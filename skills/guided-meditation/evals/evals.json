@@ -1,0 +1,35 @@
+{
+  "skill_name": "guided-meditation",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Make me a 10-minute guided meditation for winding down after work, set on a quiet beach at any time of day. Calm British female voice. I want the raw voice track plus a version with gentle music and ocean sounds.",
+      "expected_output": "brief.md; script.json that validates with no errors (8-14 segments of varied length, rests growing from ~5-10 s to 20-45 s, a closing rest, music cues anchored to segment boundaries ending at gain 0, a steady loopable surf ambience, optional bells); script.md and timing.md shown to the user; check_setup run; voices.py suggest used to pick a British female voice; an audition of the script's opening played to the user and accepted before full synthesis; timing.words_per_minute updated from the measured pace; all passages synthesized with stitching; voice/voice-track.wav and voice/timeline.json; music and ambience generated; output/<slug>.voice.{wav,mp3} and output/<slug>.voice-music-sfx.{wav,mp3}; qa/report.md without FAIL; final report with measured length, voice loudness, true peak, credits from the ledger, and the listening checklist",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "5-minute breathing meditation, voice only, use my voice Clara on multilingual v2. Don't ask me questions.",
+      "expected_output": "defaults recorded in brief.md; script validated (4-10 segments, no audio tags since the model is v2); Clara found in the account with voices.py; one audition of the opening generated, accepted by default and reported as accepted by default rather than by ear; remaining passages synthesized; assembled voice track; only output/<slug>.voice.{wav,mp3}; no music or SFX credits spent; QA report and a note that the voice gate was passed by default",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Here's my script (meditations/forest/script.txt). Turn it into a sleep meditation track with a 5-minute rest before the last line, voice+music only. Keep my words exactly.",
+      "expected_output": "the user's words preserved verbatim in script.json (validated: only segmentation, phrase pauses, closing rest of 300 s with its minimum, music plan added); rule violations in the user's text flagged to the user rather than rewritten; music fades out in the final portion of the closing rest before the last line; voice and voice+music versions only; sleep-appropriate levels suggested (e.g. --music-db -19 or quieter)",
+      "files": ["meditations/forest/script.txt"]
+    },
+    {
+      "id": 4,
+      "prompt": "Segments 03 and 06 of meditations/tropical-waterfall sound rushed. Redo just those and remix everything; keep the rest exactly as it is.",
+      "expected_output": "other segments frozen with synthesize.py --freeze; 03 and 06 retaken as whole passages (not word edits), ideally 2 takes each for the user to pick; no other passage regenerated; assemble_voice.py and mix.py rerun; screening notes for 03 and 06 compared before and after; credits for only two passages",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "The music in the lake meditation is too loud and the rain loop repeats a noticeable drip. Fix both.",
+      "expected_output": "music lowered with mix.py --music-db (free, no regeneration); a second ambience take generated and alternated with --select ambience=ambience-01+ambience-02, or a steadier ambience prompt without distinctive events; remix of every existing version; QA rerun; the user asked to listen to the loop join and music level",
+      "files": []
+    }
+  ]
+}

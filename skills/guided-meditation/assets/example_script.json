@@ -1,0 +1,184 @@
+{
+  "schema_version": 5,
+  "title": "Rain on the roof",
+  "slug": "rain-on-the-roof",
+  "scene": "a quiet room under a wooden roof while steady rain falls, at any time of day",
+  "scene_conditions": "Time of day is not fixed and may be any time; avoid light, sky or time-of-day assumptions.",
+  "theme": "arriving and resting",
+  "voice": "Calm, warm, unhurried voice; close and conversational, never theatrical.",
+  "language": "en",
+  "target_seconds": 420,
+  "duration_mode": "approximate",
+  "session": {
+    "lead_in_ms": 6000,
+    "tail_ms": 20000
+  },
+  "timing": {
+    "words_per_minute": 90
+  },
+  "closing_rest": {
+    "segment_id": "07",
+    "duration_ms": 90000,
+    "minimum_duration_ms": 60000,
+    "music": "Keep the same quiet bed with the rain through the rest, fading it over the final 15 seconds so the last line is spoken over rain alone.",
+    "final_spoken_segment_id": "08",
+    "included_in_session_duration": true
+  },
+  "music": {
+    "enabled": true,
+    "prompt": "Instrumental only. An almost still ambient bed for a guided meditation: warm analog synth pads and soft bowed strings holding long tones in D major, around 60 BPM with no discernible pulse. Slow attacks, long releases, very few note changes, gentle tape saturation, a large soft plate reverb. Calm and steady from start to finish, with no percussion, no lead melody and no builds.",
+    "generation": {
+      "model_id": "music_v2_5",
+      "length_ms": 180000,
+      "force_instrumental": true
+    },
+    "source_file": null,
+    "mix_notes": "Keep the bed well below the voice with the rain still recognizable. Soften the presence range so it never competes with a quiet voice, smooth any musical swells, and duck slowly across whole spoken passages rather than word by word.",
+    "gain_reference": "1.0 is the calibrated quiet music bed",
+    "looping": {
+      "crossfade_ms": 12000
+    },
+    "initial_gain": 0,
+    "music_free_pauses": ["06"],
+    "cues": [
+      {
+        "id": "M01",
+        "anchor": { "segment_id": "02", "boundary": "segment_start", "offset_ms": 0 },
+        "target_gain": 1,
+        "fade_ms": 25000,
+        "direction": "Bring the bed in slowly under the rain and voice; the opening belongs to the rain."
+      },
+      {
+        "id": "M02",
+        "anchor": { "segment_id": "04", "boundary": "speech_end", "offset_ms": 0 },
+        "target_gain": 0.6,
+        "fade_ms": 20000,
+        "direction": "Let the same texture recede during the breathing rest."
+      },
+      {
+        "id": "M03",
+        "anchor": { "segment_id": "05", "boundary": "speech_end", "offset_ms": 0 },
+        "target_gain": 0,
+        "fade_ms": 30000,
+        "direction": "Withdraw the music before the short invitation in 06 so its rest is rain only."
+      },
+      {
+        "id": "M04",
+        "anchor": { "segment_id": "07", "boundary": "segment_start", "offset_ms": 0 },
+        "target_gain": 1,
+        "fade_ms": 40000,
+        "direction": "Return with the same bed, no new theme announcing it."
+      },
+      {
+        "id": "M05",
+        "anchor": { "segment_id": "07", "boundary": "pause_end", "offset_ms": -15000 },
+        "target_gain": 0,
+        "fade_ms": 15000,
+        "direction": "Fade out over the last 15 seconds of the closing rest; the final line is spoken over rain."
+      }
+    ]
+  },
+  "sfx": {
+    "enabled": true,
+    "ambience": {
+      "enabled": true,
+      "prompt": "Steady light rain on a wooden roof, heard from inside a quiet room. Even, continuous patter with soft drips from the eaves.",
+      "generation": {
+        "duration_seconds": 30,
+        "prompt_influence": 0.35,
+        "loop": true
+      },
+      "source_file": null,
+      "mix_notes": "The rain is the primary anchor: present from the first second, recognizable under the voice, still there after the last word.",
+      "initial_gain": 0,
+      "fade_in_ms": 5000,
+      "fade_out_ms": 15000,
+      "cues": []
+    },
+    "one_shots": [
+      {
+        "id": "S01",
+        "prompt": "A single soft singing bowl strike in a quiet room, warm tone with a long natural decay.",
+        "duration_seconds": 7,
+        "prompt_influence": 0.6,
+        "anchor": { "boundary": "session_start", "offset_ms": 800 },
+        "gain": 1.0,
+        "direction": "Opening bell; the first words arrive as it decays."
+      },
+      {
+        "id": "S02",
+        "same_as": "S01",
+        "duration_seconds": 7,
+        "anchor": { "segment_id": "08", "boundary": "speech_end", "offset_ms": 3000 },
+        "gain": 0.8,
+        "direction": "Closing bell after the final line, a little softer."
+      }
+    ]
+  },
+  "segments": [
+    {
+      "id": "01",
+      "phrases": [
+        { "text": "[exhales] Let's start where you are, with the rain on the roof and a place to rest.", "pause_after_ms": 800 },
+        { "text": "Shift anything that needs shifting.", "pause_after_ms": 0 }
+      ],
+      "pause_after_ms": 8000
+    },
+    {
+      "id": "02",
+      "phrases": [
+        { "text": "The rain doesn't keep time. Some drops land close and sharp; others blur into a soft hiss further off.", "pause_after_ms": 900 },
+        { "text": "Listen to the whole of it for a while, without picking anything out.", "pause_after_ms": 0 }
+      ],
+      "pause_after_ms": 15000
+    },
+    {
+      "id": "03",
+      "phrases": [
+        { "text": "Now the body. There's weight here, meeting whatever holds it: a chair, a cushion, the floor.", "pause_after_ms": 1000 },
+        { "text": "Let that support do some of the work.", "pause_after_ms": 0 }
+      ],
+      "pause_after_ms": 25000
+    },
+    {
+      "id": "04",
+      "phrases": [
+        { "text": "Breathing is already happening.", "pause_after_ms": 1200 },
+        { "text": "Leave its pace alone. Feel where it moves most easily, the belly perhaps, or the chest.", "pause_after_ms": 1000 },
+        { "text": "In. And out.", "pause_after_ms": 0 }
+      ],
+      "pause_after_ms": 35000
+    },
+    {
+      "id": "05",
+      "phrases": [
+        { "text": "Thoughts come and go the way the rain does, heavier for a while, then lighter.", "pause_after_ms": 1000 },
+        { "text": "When you notice you've drifted into planning or remembering, that's fine. It's still there to come back to.", "pause_after_ms": 0 }
+      ],
+      "pause_after_ms": 40000
+    },
+    {
+      "id": "06",
+      "phrases": [
+        { "text": "[whispers] Stay with the rain.", "pause_after_ms": 0 }
+      ],
+      "pause_after_ms": 45000
+    },
+    {
+      "id": "07",
+      "phrases": [
+        { "text": "Still here. Rain on the roof. Breath coming and going.", "pause_after_ms": 1100 },
+        { "text": "If your attention wandered, it hasn't gone anywhere wrong. It can come back from wherever it went.", "pause_after_ms": 0 }
+      ],
+      "pause_after_ms": 90000
+    },
+    {
+      "id": "08",
+      "phrases": [
+        { "text": "Take your time coming back.", "pause_after_ms": 900 },
+        { "text": "The rain will keep going without you.", "pause_after_ms": 0 }
+      ],
+      "pause_after_ms": 0
+    }
+  ]
+}

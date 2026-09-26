@@ -1,0 +1,8 @@
+.claude
+.env
+!.env.example
+samples/
+meditations/
+__pycache__/
+.ruff_cache/
+.DS_Store
