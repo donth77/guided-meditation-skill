@@ -1,6 +1,7 @@
 ---
 name: guided-meditation
 description: Produce a finished guided meditation audio track with ElevenLabs. Writes a timed script (phrases, rests, closing rest), auditions and locks a narrator voice, synthesizes connected passages, assembles the narration with exact rests, and optionally adds generated music and sound effects (nature ambience, bells), looped, cued and loudness-matched. Always delivers a raw voice track, plus voice+music, voice+sfx and/or voice+music+sfx versions. Use whenever someone wants a guided meditation, relaxation or sleep narration, breathing exercise, body scan, yoga nidra or mindfulness audio written, voiced, scored or remixed, even if ElevenLabs is not named, and for retakes or re-mixes of an existing session.
+argument-hint: "[length, setting, voice, versions]"
 ---
 
 # Guided meditation
