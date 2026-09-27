@@ -16,10 +16,14 @@ add music and nature sounds.
    `/guided-meditation` and describe what you want: length, setting, voice, and which versions.
    Or just ask for a guided meditation; Claude picks up the skill on its own.
 2. You approve the script.
-3. You pick the voice from short samples of the opening.
-4. Claude records the rest, making extra takes where needed to keep it smooth.
-5. Claude generates music and nature sounds with ElevenLabs from short descriptions, or uses
-   your own recordings, and mixes each version.
+3. You pick the voice from short samples of the opening. If you love a voice but it reads in a
+   choppy way, Claude can have a smoother voice read the script and turn that reading into the
+   voice you picked.
+4. Claude records the rest, making extra takes where needed to keep it smooth. You can approve
+   it one section at a time.
+5. Claude adds music and nature sounds: generated with ElevenLabs, composed to follow the
+   meditation, or your own tracks (from Suno or a royalty-free library, for example). You can
+   hear the same narration with each kind of music side by side.
 
 You see a cost estimate before anything is charged, and every take is kept.
 

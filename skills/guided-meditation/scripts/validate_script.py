@@ -16,7 +16,8 @@ Exit 0 when there are no errors, 1 otherwise. Warnings are advice to act on or t
 Checks structure, phrase and segment pause rules, audio-tag limits for the chosen model, the
 closing rest, every music/ambience/SFX cue anchor, chronology and fade overlap on the estimated
 clock, music-free interludes, the final music state, filler and permission phrases, repeated
-openings, uniform segment lengths, and estimated duration and credits.
+openings, uniform segment lengths, segments too long for one multilingual v2 request, and estimated
+duration and credits.
 """
 from __future__ import annotations
 
@@ -28,9 +29,9 @@ import sys
 
 from gm_common import (
     ANCHOR_BOUNDARIES, MUSIC_CREDITS_PER_MINUTE, PERMITTED_TAGS, SESSION_BOUNDARIES, SFX_CREDITS_PER_SECOND,
-    count_words, cue_envelope, estimated_timeline, find_tags, fmt_time, is_v3, load_script, read_json,
-    resolve_anchor, segment_request, session_pads, session_root, strip_tags, timeline_segment, tts_rate,
-    words_per_minute, write_json,
+    STS_CREDITS_PER_MINUTE, V2_REQUEST_MAX_S, count_words, cue_envelope, estimated_timeline, find_tags, fmt_time,
+    is_v3, load_script, read_json, resolve_anchor, segment_request, session_pads, session_root, strip_tags,
+    timeline_segment, tts_rate, words_per_minute, write_json,
 )
 
 FILLER = ["simply", "just allow yourself to", "gently", "as you", "notice how you begin to"]
@@ -423,10 +424,28 @@ def check(script, model, r):
     return timeline
 
 
-def credits(script, model, models=None):
+def request_length(script, model, r):
+    """Segments whose reading may pass what one multilingual v2 request returns (it squeezes the
+    reading to fit rather than running longer)."""
+    if model != "eleven_multilingual_v2":
+        return
+    wpm = words_per_minute(script)
+    for seg in script.get("segments") or []:
+        words = sum(count_words(p.get("text") or "") for p in seg.get("phrases") or [])
+        est = words / wpm * 60.0
+        if est > 0.8 * V2_REQUEST_MAX_S:   # slow voices and many short sentences read longer than the estimate
+            r.w(f"[{seg['id']}] {words} words read in about {est:.0f}s at {wpm:g} words/min; one multilingual v2 "
+                f"request returns at most {V2_REQUEST_MAX_S:.1f}s, squeezing a longer reading to fit. Consider "
+                "splitting the segment at a sentence boundary")
+
+
+def credits(script, model, models=None, conversion=False):
     keep = is_v3(model)
     chars = sum(len(segment_request(s, keep)[0]) for s in script["segments"])
     out = {"model": model, "narration_chars": chars, "narration": chars * tts_rate(model, models)}
+    if conversion:      # each passage is read by the guide, then converted: billed per minute of audio
+        words = sum(count_words(p["text"]) for s in script["segments"] for p in s["phrases"])
+        out["narration"] += words / words_per_minute(script) * STS_CREDITS_PER_MINUTE
     music = script.get("music") or {}
     out["music"] = 0.0
     if music.get("enabled") and not music.get("source_file"):
@@ -493,13 +512,18 @@ def main():
     root = session_root(args.session)
     script = load_script(root)
     voice = read_json(root / "voice.json", {}) or {}
+    conversion = voice.get("method") == "speech_to_speech"
+    if conversion:      # a conversion recipe: its guide voice reads the text
+        voice = {**voice, "model_id": (voice.get("guide") or {}).get("model_id")}
     model = args.model or voice.get("model_id") or "eleven_multilingual_v2"
     r = Report()
     timeline = check(script, model, r)
+    if timeline is not None:
+        request_length(script, model, r)
     result = {"errors": r.errors, "warnings": r.warnings, "info": r.info}
     if timeline is not None:
         tb = timing_block(script, timeline)
-        cr = credits(script, model)
+        cr = credits(script, model, conversion=conversion)
         result.update({"timing": tb, "credits": cr, "estimated_timeline": timeline})
         target = script.get("target_seconds")
         est = tb["estimated_seconds"]
@@ -523,7 +547,8 @@ def main():
     print(f"{title}  (script.json, schema {script.get('schema_version')}): {len(segs)} segments, {nphr} phrases")
     if timeline is not None:
         tb, cr = result["timing"], result["credits"]
-        print(f"Model for tag/credit checks: {model}")
+        print(f"Model for tag/credit checks: {model}" + (" (guide reading; narration credits include the conversion)"
+                                                           if conversion else ""))
         print(f"Estimate at {tb['words_per_minute']:g} wpm: {tb['spoken_words']} words, speech "
               f"{fmt_time(tb['estimated_speech_seconds'])} + phrase rests {fmt_time(tb['phrase_pause_seconds'])} + "
               f"segment rests {fmt_time(tb['between_segments_seconds'])} + lead-in/tail "

@@ -91,10 +91,23 @@ assembly, not the estimate, is the real length.
 - Each phrase's `pause_after_ms` is the minimum rest after the whole phrase. Every non-final
   phrase has a purposeful positive pause (typically 600-1500 ms); the last phrase of a segment
   has 0, because the segment's `pause_after_ms` owns the following rest.
+- Plan the pauses from the content, including in a user's own script (keep their words; the
+  pauses are yours). Give each separate thought its own phrase: about 1.4 s between sentences
+  that each say something, 1.2 s between closely linked ones, 1.5-1.6 s after a line that should
+  land ("The water has its pace." before "You have yours."), under 1 s only for a fragment that
+  continues a thought ("There's room to shift. To find a place for your hands."). Keep lists and
+  one-breath sentences whole. Do not rely on the voice's own pause at a full stop: one voice
+  paused 1.4-1.6 s and sounded calm, another 0.5-1.0 s and sounded rushed with the same words.
+  Assembly notes every full stop where the voice pauses under 0.8 s inside a phrase.
 - Write plain punctuation. No ellipses as pacing, no pause labels, durations or stage
   directions in spoken text; the voice would read them or perform them oddly.
 - Assembly adds only the rest that the natural gap does not already provide, keeps breaths,
   and never touches the inside of a phrase.
+- Each segment is one request. Keep a segment's reading under about 20 s, roughly 30 words at a
+  meditation pace: one multilingual v2 request returns at most about 23.7 s and squeezes a longer
+  reading to fit (hurried words, a clipped last breath). Split a longer one at a sentence
+  boundary into two segments, the rest between them as the first one's `pause_after_ms`, and
+  move any cue anchored to the old segment's end to the second one. `validate_script.py` warns.
 
 ## Audio tags
 
@@ -111,9 +124,11 @@ assembly, not the estimate, is the real length.
   character (the Music API follows key, BPM and studio vocabulary well: "in D major", "no
   discernible pulse", "large soft plate reverb"). Match the scene and voice. Favour a consistent
   palette, few changes and long fades; no dramatic arc.
-- Keep the voice intelligible and the scene's anchor recognizable: almost still pads or drones
-  if melodic music feels too active; no recurring plucks, bright attacks, beats, builds or
-  vocals. Never name artists, bands or songs (the API rejects them).
+- Keep the voice intelligible and the scene's anchor recognizable: sparse and slow (soft felt
+  piano, warm pads, slow-attack strings, few notes), no recurring plucks, bright attacks, beats,
+  builds or vocals. A prompt that asks only for stillness comes back as a drone that listeners
+  hear as "a single steady tone, not really music". Never name artists, bands or songs (the API
+  rejects them).
 - Music has no speech, vocals or environmental effects; ambience is the SFX layer.
 - Cue gain 1.0 means the calibrated quiet bed, not full scale. Each cue moves from the gain at
   its start to `target_gain` over `fade_ms` with a smoothstep curve.
@@ -128,7 +143,9 @@ assembly, not the estimate, is the real length.
   final portion (anchor to the rest's `pause_end` with a negative offset) so the closing line is
   spoken over ambience alone.
 - Loop needs are handled in the mix (long crossfades between compatible passages, phase
-  continuous through muted interludes), so a 2-4 minute generation usually suffices.
+  continuous through muted interludes), so a 2-4 minute generation usually suffices. Music that
+  should change with the cues is composed to the measured timeline instead ("Composed to the
+  session" in `audio-production.md`).
 - If music is disabled: `enabled: false`, `initial_gain: 0`, empty `cues` and
   `music_free_pauses`.
 

@@ -113,14 +113,17 @@ def main():
     ap.add_argument("--stt-model", default="scribe_v2")
     ap.add_argument("--force", action="store_true", help="re-transcribe passages that already have a transcript")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--tag", default="", help="check the mix made with mix.py --tag TAG (output/manifest.TAG.json; "
+                                              "run it right after that mix, since the stems are shared)")
     args = ap.parse_args()
+    tag = f".{args.tag}" if args.tag else ""
 
     root = session_root(args.session)
     script = load_script(root)
     timeline = read_json(root / "voice" / "timeline.json")
-    manifest = read_json(root / "output" / "manifest.json")
+    manifest = read_json(root / "output" / f"manifest{tag}.json")
     if not timeline or not manifest:
-        die("run assemble_voice.py and mix.py first (voice/timeline.json, output/manifest.json)")
+        die(f"run assemble_voice.py and mix.py first (voice/timeline.json, output/manifest{tag}.json)")
     checks, notes = [], []
 
     def check(status, name, detail):
@@ -272,7 +275,7 @@ def main():
                                                      "estimated_without_header": round(uncharged_est),
                                                      "estimated_total": round(est)},
               "manifest_warnings": manifest.get("warnings", [])}
-    write_json(root / "qa" / "report.json", report)
+    write_json(root / "qa" / f"report{tag}.json", report)
 
     title = script.get("title") or root.name
     md = [f"# QA: {title}", "", f"{now_iso()} · automated status **{status}**"
@@ -301,11 +304,11 @@ def main():
         md.append(f"**{section}**")
         md += [f"- [ ] {i}" for i in items]
         md.append("")
-    (root / "qa" / "report.md").write_text("\n".join(md) + "\n", encoding="utf-8")
+    (root / "qa" / f"report{tag}.md").write_text("\n".join(md) + "\n", encoding="utf-8")
 
     for c in checks:
         print(f"  {c['status']:<5} {c['check']}: {c['detail']}")
-    print(f"QA {status}{' (mock audio)' if mock else ''} -> qa/report.md")
+    print(f"QA {status}{' (mock audio)' if mock else ''} -> qa/report{tag}.md")
     raise SystemExit(1 if status == "FAIL" else 0)
 
 

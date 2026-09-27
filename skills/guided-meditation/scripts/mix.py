@@ -36,7 +36,7 @@ import numpy as np
 from gm_common import (
     BLOCK, SR, Envelope, PieceStream, WavWriter, cue_envelope, db_to_gain, die, duck_envelope, ffmpeg_bin,
     ffmpeg_filter_file, fmt_time, layers_for, level_db, load_script, measure_loudness, merge_windows,
-    music_free_windows, music_loop_plan, now_iso, open_wav_f32, parse_outputs, probe_duration, read_json,
+    music_activity, music_free_windows, music_loop_plan, now_iso, open_wav_f32, parse_outputs, probe_duration, read_json,
     resolve_anchor, seamless_loop_plan, session_root, sha256_file, slug_of, trim_digital_silence, variant_slug, warn,
     write_json, write_wav_f32,
 )
@@ -83,7 +83,7 @@ def music_source(root, script, override):
         die("no music source: run generate_music.py (or pass --music FILE / set music.source_file)")
     meta = read_json(root / "music" / f"{name}.json") or {}
     return root / "music" / meta["audio_file"], {"file": f"music/{meta['audio_file']}", "mock": meta.get("mock"),
-                                                 "model_id": meta.get("model_id")}
+                                                 "model_id": meta.get("model_id"), "timed": meta.get("timed")}
 
 
 def ambience_sources(root, amb, override):
@@ -145,11 +145,79 @@ def build_voice(root, total, gain_db, out):
     write_stream(out, total, 1, block)
 
 
+def place_music(x, t, s, c, total_s, tl, env, mute, fixed=None, sr=SR):
+    """Where in the source the bed starts. The bed plays x[offset:t] once, then loops x[s:t] with a
+    crossfade of c samples at each join. Chooses the offset (1 s steps) that puts the source's
+    calmest stretches under the narration and its busier moments and loop joins in the rests,
+    weighted by how audible the music is (cue gain x music-free muting). Returns a report dict."""
+    times, act, events = music_activity(x, sr)
+    hop = float(times[1] - times[0]) if len(times) > 1 else 0.5
+    L_s = len(x) / sr
+    straight = L_s >= total_s          # long enough to play through without a join
+    if straight:
+        t = len(x)
+    t_s, s_s, c_s = t / sr, s / sr, c / sr
+    cyc = max(t_s - s_s, c_s + 0.5)
+    fr = np.arange(0.0, total_s, 0.5)
+    g = np.array([env.value_at(f * 1000.0) * mute.value_at(f * 1000.0) for f in fr])
+    speech = np.zeros(len(fr), dtype=bool)
+    for sg in tl["segments"]:
+        speech |= (fr >= sg["segment_start_ms"] / 1000.0 - 0.5) & (fr <= sg["speech_end_ms"] / 1000.0 + 0.5)
+    weight = g * np.where(speech, 1.0, 0.2)
+
+    def mapping(o):
+        d0 = t_s - o
+        src = np.where(fr < d0, o + fr, s_s + np.mod(fr - d0, cyc))
+        joins = [] if d0 >= total_s else [float(j) for j in np.arange(max(d0, 0.0), total_s, cyc)]
+        return src, joins
+
+    def act_at(src):
+        return act[np.clip(np.round((src - times[0]) / hop).astype(int), 0, len(act) - 1)]
+
+    def cost(o):
+        src, joins = mapping(o)
+        total = float(np.sum(weight * act_at(src)))
+        for j in joins:
+            m = (fr >= j) & (fr < j + c_s)
+            if m.any() and g[m].max() > 0.05:
+                total += 6.0 * float(g[m].max()) * (1.0 + 3.0 * float(speech[m].mean()))
+        return total
+
+    top = (L_s - total_s) if straight else (t_s - 1.0)
+    candidates = [float(fixed)] if fixed is not None else list(np.arange(0.0, max(0.5, top + 1e-9), 1.0))
+    o = min(candidates, key=cost)
+    src, joins = mapping(o)
+    a = act_at(src)
+    segs = []
+    for sg in tl["segments"]:
+        m = (fr >= sg["segment_start_ms"] / 1000.0) & (fr <= sg["speech_end_ms"] / 1000.0) & (g > 0.05)
+        if m.any():
+            v = float(a[m].mean())
+            segs.append({"id": sg["id"], "activity": round(v, 2),
+                         "feel": "calm" if v < 0.35 else "moderate" if v < 0.6 else "busier"})
+    under = []
+    for e in events:
+        m = (np.abs(src - e) < hop) & speech & (g > 0.05)
+        if m.any():
+            under.append(round(float(fr[m][0]), 1))
+    return {"offset_s": round(float(o), 1), "source_s": round(len(x) / sr, 1),
+            "joins": [{"at_s": round(j, 1), "under_speech": bool(speech[(fr >= j) & (fr < j + c_s)].any()),
+                       "music_gain": round(float(g[(fr >= j) & (fr < j + c_s)].max() if ((fr >= j) & (fr < j + c_s)).any() else 0), 2)}
+                      for j in joins],
+            "segments": segs, "events_under_speech_s": sorted(set(under)), "cost": round(cost(o), 1),
+            "chosen": "fixed" if fixed is not None else "auto", "straight_through": straight}
+
+
 def build_music(root, script, tl, total, args, work, report):
     music = script["music"]
     src, info = music_source(root, script, args.music)
     pre = ffmpeg_filter_file(src, work / "music_pre.wav", [] if args.no_music_eq else MUSIC_FILTERS, 2)
-    x = trim_digital_silence(np.array(open_wav_f32(pre)[0]), -70.0)
+    x = np.array(open_wav_f32(pre)[0])
+    fixed = None if str(args.music_offset).lower() == "auto" else float(args.music_offset)
+    if fixed is None and info.get("timed"):
+        fixed = 0.0         # fit_music.py output: already on the session clock
+    if fixed is None:
+        x = trim_digital_silence(x, -70.0)       # a fixed offset means the file is aligned: keep its head
     xf = float((music.get("looping") or {}).get("crossfade_ms", 12000))
     prefix, cycle, loop = music_loop_plan(x, crossfade_ms=xf)
     write_wav_f32(work / "music_cycle.wav", np.concatenate(cycle))
@@ -171,7 +239,15 @@ def build_music(root, script, tl, total, args, work, report):
         mute.add(max(0.0, a - 2500.0), a, 0.0, "music-free")
         mute.add(b, b + 2500.0, 1.0, "music-free end")
     report["warnings"] += [f"music: {n}" for n in env.notes]
-    stream = PieceStream(prefix, cycle, 2)
+    t_end = len(prefix[0])
+    c_len = len(cycle[0])
+    s_start = t_end - (len(cycle[0]) + len(cycle[1]))
+    place = place_music(x, t_end, s_start, c_len, total / SR, tl, env, mute, fixed)
+    o = int(round(place["offset_s"] * SR))
+    if place["straight_through"]:
+        stream = PieceStream([x[o:]], [np.zeros((SR, 2), dtype=np.float32)], 2)
+    else:
+        stream = PieceStream([x[o:t_end]] if o < t_end else [], cycle, 2)
     g = db_to_gain(gain_db)
     write_stream(root / "stems" / "music.wav", total, 2,
                  lambda s, n: stream.read(n) * (env.block(s, n) * duck.block(s, n) * mute.block(s, n) * g)[:, None])
@@ -180,7 +256,8 @@ def build_music(root, script, tl, total, args, work, report):
                        "duck_db": args.duck_db, "eq": not args.no_music_eq,
                        "cues": [{"id": r["label"], "start_s": round(r["t0"] / 1000, 2),
                                  "end_s": round(min(r["t1"], r["cut"]) / 1000, 2), "target": r["g1"]}
-                                for r in env.ramps]}
+                                for r in env.ramps],
+                       "placement": place}
     if info.get("mock"):
         report["mock"] = True
 
@@ -324,9 +401,13 @@ def main():
     ap.add_argument("--ambience-duck-db", type=float, default=-1.5, help="ambience reduction across speech (0 = off)")
     ap.add_argument("--no-music-eq", action="store_true", help="skip the music high-pass, presence dip and peak control")
     ap.add_argument("--ambience-xfade-ms", type=float, help="join crossfade for the ambience loop")
+    ap.add_argument("--music-offset", default="auto", help="seconds into the music source where the bed starts; "
+                    "'auto' (default) puts calm stretches under the voice and busier moments and loop joins in rests")
     ap.add_argument("--music", help="use this music file instead of the selected/generated one")
     ap.add_argument("--ambience", help="use these ambience files (comma list) instead of the selected ones")
     ap.add_argument("--keep-work", action="store_true", help="keep stems/.work intermediate files")
+    ap.add_argument("--tag", help="suffix for this mix's files (e.g. suno -> <slug>.voice-music.suno.mp3), so "
+                    "versions with different music sit side by side")
     args = ap.parse_args()
 
     root = session_root(args.session)
@@ -344,6 +425,7 @@ def main():
     slug = slug_of(script, root)
     title = script.get("title") or slug
     stems, work, outdir = root / "stems", root / "stems" / ".work", root / "output"
+    tag = f".{args.tag}" if args.tag else ""
     work.mkdir(parents=True, exist_ok=True)
     outdir.mkdir(exist_ok=True)
     report = {"warnings": [], "mock": bool(timeline.get("mock"))}
@@ -404,7 +486,7 @@ def main():
         g = gains[v]
         files = []
         for fmt in formats:
-            out = outdir / f"{slug}.{variant_slug(v)}.{fmt}"
+            out = outdir / f"{slug}.{variant_slug(v)}{tag}.{fmt}"
             encode(layers, graph, g, out, f"{title} ({v.replace('+', ' + ')})", graph is None, limit_db)
             files.append(str(out.relative_to(root)))
         tp = m["TP"] + g if finite(m["TP"]) else None
@@ -423,7 +505,7 @@ def main():
                 "settings": {"music_db": args.music_db, "ambience_db": args.ambience_db, "sfx_db": args.sfx_db,
                              "duck_db": args.duck_db, "ambience_duck_db": args.ambience_duck_db,
                              "music_eq": not args.no_music_eq}, **report}
-    write_json(outdir / "manifest.json", manifest)
+    write_json(outdir / f"manifest{tag}.json", manifest)
 
     print(f"{title}: {fmt_time(total / SR)}, voice stem normalised {gv:+.1f} dB to {args.lufs} LUFS; "
           f"normalize={args.normalize}")
@@ -437,11 +519,22 @@ def main():
         lp = report["music"]["loop"]
         print(f"  music loop: restart {lp['restart_s']}s, crossfade {lp['crossfade_s']}s at {lp['crossfade_start_s']}s, "
               f"cycle {lp['cycle_s']}s (join cost {lp['join_cost']})")
+        pl = report["music"].get("placement") or {}
+        if pl:
+            fmt = lambda v: f"{int(v // 60)}:{v % 60:04.1f}"  # noqa: E731
+            joins = ", ".join(f"{fmt(j['at_s'])} ({'UNDER SPEECH' if j['under_speech'] else 'in a rest'})"
+                              for j in pl["joins"] if j["music_gain"] > 0.05) or "none audible"
+            feel = ", ".join(f"{sg['id']} {sg['feel']}" for sg in pl["segments"])
+            print(f"  music placement ({pl['chosen']}): bed starts {pl['offset_s']}s into the {pl['source_s']}s source; "
+                  f"loop joins {joins}")
+            print(f"  music under each passage: {feel}"
+                  + (f"; note events under speech at {', '.join(fmt(e) for e in pl['events_under_speech_s'])}"
+                     if pl["events_under_speech_s"] else ""))
     if report["mock"]:
         print("MOCK audio in this mix: rehearsal only, not a deliverable")
     for w in report["warnings"]:
         warn(w)
-    print("manifest -> output/manifest.json; stems -> stems/")
+    print(f"manifest -> output/manifest{tag}.json; stems -> stems/")
 
 
 if __name__ == "__main__":

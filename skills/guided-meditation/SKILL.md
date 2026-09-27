@@ -33,7 +33,7 @@ measured length, levels, credits spent, and anything not yet approved by ear.
 brief.md  script.json  script.md  script.txt  timing.md  voice.json  ledger.jsonl
 voice/audition/take-0001.mp3 (+.json, .alignment.json, .preview.mp3)   voice/passages/<seg>/take-01.mp3 ...
 voice/selection.json  voice/voice-track.wav  voice/timeline.json
-music/source-01.mp3 (+.json)  music/selection.json
+music/source-01.mp3 (+.json)  music/selection.json  music/timed.json  music/fitted.flac
 sfx/ambience-01.mp3  sfx/one-shots/S01-01.mp3  sfx/selection.json
 stems/voice.wav music.wav sfx.wav      output/<slug>.voice.wav|mp3 ... manifest.json    qa/report.md
 ```
@@ -44,12 +44,13 @@ stems/voice.wav music.wav sfx.wav      output/<slug>.voice.wav|mp3 ... manifest.
 | `scripts/voices.py` | `suggest`, `mine`, `library`, `similar` (voices that sound like a take), `show`, `preview`; `--measure` screens previews for whisper strength (free); `add` is optional (uses a voice slot: ask first) |
 | `scripts/validate_script.py` | every script rule, estimated timing, credit estimate; `--write` fills the timing block |
 | `scripts/render_script.py` | script.md (phrases, pauses, cue notes), script.txt, timing.md (estimated, then measured) |
-| `scripts/synthesize.py` | `--audition` (with previews at the script's rests), `--accept`, passages as numbered takes with stitching; `--retake`, `--freeze`, `--select`, `--list`, `--preview`, `--rescreen`; `--convert` re-voices a take (speech to speech, auditions only) |
+| `scripts/synthesize.py` | `--audition` (with previews at the script's rests), `--accept`, passages as numbered takes (`--takes N` stops at the first good reading); `--retake`, `--freeze`, `--select`, `--list`, `--preview`, `--rescreen`; `--convert` re-voices a take in another voice (speech to speech), and an accepted conversion becomes the recipe for every passage |
 | `scripts/assemble_voice.py` | voice-track.wav + timeline.json: splits only at phrase boundaries, adds only missing rest |
-| `scripts/generate_music.py` | Music API candidates from the script's prompt; `--select`, `--plan-only`, bad_prompt handling |
+| `scripts/generate_music.py` | Music API candidates from the script's prompt or a composition plan; `--select`, `--plan-only`, bad_prompt handling |
+| `scripts/fit_music.py` | places composed music on the measured clock (`music/timed.json`); rerun after retakes, free |
 | `scripts/generate_sfx.py` | ambience loop and one-shots from the script; several ambience takes alternate |
-| `scripts/mix.py` | calibrated stems and the requested versions; looping, cues, ducking, loudness, peak ceiling |
-| `scripts/qa_report.py` | file, loudness, timing, cue and silence checks; `--transcribe` word diff; listening checklist |
+| `scripts/mix.py` | calibrated stems and the requested versions; looping, cues, ducking, loudness, peak ceiling; `--tag` keeps versions with different music side by side |
+| `scripts/qa_report.py` | file, loudness, timing, cue and silence checks; `--transcribe` word diff; listening checklist; `--tag` for a tagged mix |
 | `scripts/pipeline.py` | runs the remaining phases; prints the plan and cost unless `--yes`; `--mock` rehearses offline |
 
 Read `references/script-writing.md` and `references/script-schema.md` before Phase 1,
@@ -88,7 +89,10 @@ instrumental bed, all four versions, 6 s lead-in, 20 s tail, a closing rest of a
 of the session, WAV + MP3 at -18 LUFS.
 
 A user-supplied script keeps its words. The work is segmentation, pauses, closing rest and the
-music/SFX plan; flag, don't silently fix, anything that breaks the writing rules.
+music/SFX plan: plan the pauses from the content even where the user's blocks join several
+sentences (see "Phrases and pauses" in `references/script-writing.md`); flag, don't silently
+fix, anything that breaks the writing rules. Re-splitting phrases with the same words and
+punctuation needs no new takes: assembly applies the script's current phrasing.
 
 ## Phase 1: script
 
@@ -101,6 +105,10 @@ never timing or production notes inside spoken text.
 python3 scripts/validate_script.py meditations/lake --write     # fix every error; act on or justify warnings
 python3 scripts/render_script.py meditations/lake               # script.md, script.txt, timing.md
 ```
+
+`validate_script.py` warns about segments whose reading may pass what one multilingual v2 request
+returns (about 23.7 s: longer readings come back squeezed to fit). Split those at a sentence
+boundary into two segments, the rest between them as the first one's pause.
 
 Gate: the user reads `script.md` (phrases with pause lines and cue notes) and `timing.md`
 (estimated segment times, closing rest, cue intervals). In approximate mode the estimate may
@@ -140,11 +148,14 @@ and breathy, ~80% ordinary speech) and pauses inside phrases (dips of 0.2 s or m
 20 dB under the speech, between words with no punctuation; breath and room tone count as quiet:
 the word-by-word delivery listeners reject). Whisper strength lives in the voice, not the settings: when a
 whisper is too heavy or too light, change the voice. When the listener likes a voice whose delivery
-breaks phrases whatever the settings, keep the sound and change the delivery:
-`voices.py similar TAKE.mp3` finds library voices that sound like it, and `--convert TAKE
---voice-id ID` re-voices a connected take of another voice in it (speech to speech; timing from
-the guide, timbre from the target, auditions only for now). See "Pauses inside phrases" in
-`references/voice-direction.md`. After `--accept`, set
+breaks phrases whatever the settings, keep the sound and change the delivery: a guide voice reads,
+and `--convert TAKE --voice-id ID` re-voices its take in the chosen voice (speech to speech: pace,
+pauses and intonation from the guide; timbre and accent from the target). Choose the guide for
+calm, connected reading at the wanted pace and a little breath, since breath carries through (a
+conversion measures about 10-15 points more voiced than its guide). Accepting a conversion take
+makes it the recipe: every passage is read by the guide, and only a reading near the accepted pace
+is converted. See "Pauses inside phrases" and "Conversion" in `references/voice-direction.md`.
+After `--accept`, set
 `timing.words_per_minute` to the measured pace it suggests and rerun `validate_script.py --write`
 so the estimate reflects this voice. Model and settings guidance, and what each failure
 usually means, are in `references/voice-direction.md`.
@@ -153,7 +164,9 @@ Gate: the listener approves the opening. Before the full run, audition the chose
 longer passage too (`--audition --segments 02 --takes 2`): a short opening can come out right by
 luck while the voice's ordinary delivery breaks phrases everywhere else. A model change or a new
 voice needs a fresh audition. If the opening fails, keep working on the opening; do not expand
-to the full script.
+to the full script. With a new recipe, and always with a conversion, generate the next passages
+one at a time (`--segments 03`, then `05`) and let the listener approve each before the full run:
+a whole-script run that comes out rushed wastes most of its credits.
 
 ## Phase 3: narration
 
@@ -167,18 +180,24 @@ python3 scripts/synthesize.py meditations/lake --list
 Generation is not repeatable across texts: the same voice, settings and seed can read one
 passage connected and the next with breaks, and some voices break phrases often. When the
 audition showed breaks in any take, or the listener has struggled with consistency, generate
-three or four takes per passage with `--pick`: it keeps the take with the fewest breaks inside
-phrases, then the one closest to the accepted audition's pace and breathiness, and reports
-passages where no take was clean or the pick drifted from the accepted voice. Every take stays
-on disk; the listener hears the picks, and a pick is overruled with `--select`. It multiplies
-the narration cost (still small next to music).
+up to three or four takes per passage with `--pick`: generation stops at the first reading within
+`--pace-tolerance` (15 percent) of the accepted pace with at most one short break, otherwise
+keeps the take with the fewest breaks inside phrases, then the one closest to the accepted
+audition's pace and breathiness, and reports passages where no take was clean or the pick drifted
+from the accepted voice. Every take stays on disk; the listener hears the picks, and a pick is
+overruled with `--select`. With a conversion recipe, the extra takes are guide readings (cheap)
+and only the chosen one is converted; `--convert-guide 03:take-04` converts another reading.
 
 One request per segment keeps each passage connected. With `eleven_multilingual_v2` and the
 flash/turbo models, request ids of neighbouring selected takes younger than two hours are sent
 as `previous_request_ids`/`next_request_ids` (request stitching); otherwise surrounding text is
 sent as context. `eleven_v3` accepts no context at all (no stitching, no previous/next text), so
 each v3 passage stands alone; it is the only model that performs audio tags, and tags are
-stripped for every other model.
+stripped for every other model. Some voices read much faster with context than in their
+audition (one read 121-159 words per minute against 84-108 without): when a reading with context
+comes out faster than the accepted pace, the run continues without context, and `--no-context`
+does so from the start. A take flagged at the 23.7 s request limit was squeezed to fit; more takes
+will not help, a shorter segment will.
 
 Retakes replace complete passages: `--segments 03,06 --retake` adds a take and selects it; the
 old take stays on disk (`--select 03=take-01` restores it). `--freeze 01,02,04` protects kept
@@ -207,11 +226,23 @@ python3 scripts/generate_music.py meditations/lake --candidates 2
 python3 scripts/generate_music.py meditations/lake --select source-02
 ```
 
-Generate a few minutes (default 180 s); `mix.py` loops it with long crossfades to cover the
-session. Prompts must not name artists, bands or songs (the API answers `bad_prompt` with a
-suggested prompt; `--accept-suggestion` uses it). A user-supplied licensed recording goes in
-`music.source_file` or `mix.py --music`. Gate: listen to the candidates for vocals, a beat,
-swells or bright events before mixing.
+Three routes, and they can be compared side by side (`mix.py --music FILE --tag NAME`):
+
+- A generated loop (the default): a few minutes (default 180 s) that `mix.py` loops with long
+  crossfades to cover the session, placing calm stretches under speech and joins in rests.
+- Composed to the session, when the music should recede, withdraw and return with the cues:
+  after the narration is final, write a composition plan per part (up to 10 minutes each, sections
+  of up to 2 minutes timed to the measured timeline), generate each with `--composition-plan`,
+  list the parts and their anchors in `music/timed.json`, and run `fit_music.py` to place them.
+  A retake that moves the timeline later needs only `fit_music.py` again (free).
+- A licensed recording (Suno, a royalty-free library, the user's own) in `music.source_file` or
+  `mix.py --music`; `--music-offset SECONDS` starts it at a chosen point.
+
+Prompts must not name artists, bands or songs (the API answers `bad_prompt` with a suggested
+prompt; `--accept-suggestion` uses it). A prompt that mostly lists what to avoid (no melody, no
+events, steady) comes back as a drone; name instruments, key, tempo and a sparse figure, and keep
+the avoid-list in the negative styles. `references/audio-production.md` has the details. Gate:
+listen to the candidates for vocals, a beat, swells or bright events before mixing.
 
 ## Phase 6: sound effects (voice+sfx, voice+music+sfx)
 
@@ -240,13 +271,15 @@ level in every version; beds are set relative to it (`--music-db -16`, `--ambien
 if any would pass the `--peak` ceiling (-1.5 dBTP); `--limit` catches peaks with an oversampled
 limiter instead. `--normalize integrated` levels each whole track instead (for platforms that
 normalise whole tracks). Re-mixing is free: adjust levels after listening and rerun; nothing
-is regenerated. `references/audio-production.md` explains the stems, loop joins, cue envelopes
+is regenerated. `--tag NAME` names the files `<slug>.<version>.NAME.<fmt>` (with
+`manifest.NAME.json`), so versions with different music sit side by side. `references/audio-production.md` explains the stems, loop joins, cue envelopes
 and when to change which level.
 
 ## Phase 8: QA and handover
 
 ```bash
 python3 scripts/qa_report.py meditations/lake                  # add --transcribe for a word diff (paid, small)
+python3 scripts/qa_report.py meditations/lake --tag suno       # a tagged mix: run it right after that mix
 ```
 
 Report to the user in this order: the files per version (paths), measured length against the
@@ -267,9 +300,11 @@ screening notes worth a listen, credits spent (from the ledger), and the listeni
 
 | Request | Do |
 | --- | --- |
-| "Segment 3 sounds rushed" | listen; `synthesize.py --segments 03 --retake --takes 2`; pick; assemble; mix |
+| "Segment 3 sounds rushed" | listen; `synthesize.py --segments 03 --retake --takes 2`; pick; assemble; mix. If it is flagged at the request limit, split the segment first; if readings run faster than the audition, add `--no-context` |
 | "Keep everything except 5 and 7" | `--freeze` the rest, retake 05 and 07, assemble, mix |
 | "Music is too loud / too busy" | `mix.py --music-db -19` (free); busy: new candidate or a stiller prompt |
+| "Try it with my Suno track" | put the file in `music/sourced/`; `mix.py --music music/sourced/FILE --tag suno` (free) |
+| A retake after timed music was composed | assemble, `fit_music.py`, mix (all free) |
 | "Add ocean sounds" | add or enable `sfx.ambience`, validate, `generate_sfx.py`, `mix.py --outputs ...+sfx` |
 | "Make it longer" | lengthen rests or add segments (validate, render, synthesize only the new ones) |
 | "Different voice" | new audition and accept; every passage is regenerated with the new recipe |

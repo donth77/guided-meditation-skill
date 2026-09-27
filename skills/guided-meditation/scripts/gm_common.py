@@ -50,6 +50,10 @@ SFX_CREDITS_PER_SECOND = 40
 MUSIC_CREDITS_PER_MINUTE = 900
 STS_CREDITS_PER_MINUTE = 1000   # speech to speech (voice changer), per minute of source audio
 REQUEST_ID_MAX_AGE_S = 110 * 60   # ElevenLabs ignores stitching ids older than two hours
+# The longest audio one eleven_multilingual_v2 request returned in September 2026 (174 takes): a
+# reading that would run longer comes back exactly this long, with every word present but the pace
+# squeezed to fit and the final breath clipped. A conversion keeps its guide's length.
+V2_REQUEST_MAX_S = 23.684
 
 
 # ----------------------------------------------------------------------------- misc
@@ -721,6 +725,19 @@ def write_mp3(path, data, sr=SR, bitrate="192k"):
     return Path(path)
 
 
+def write_flac(path, data, sr=SR):
+    """Encode float samples (mono or [n, ch]) to 16-bit FLAC: lossless for sources that began as MP3,
+    a fifth of the size of float WAV."""
+    a = np.asarray(data, dtype="<f4")
+    ch = 1 if a.ndim == 1 else a.shape[1]
+    cmd = [ffmpeg_bin(), "-v", "error", "-nostdin", "-y", "-f", "f32le", "-ar", str(sr), "-ac", str(ch), "-i", "pipe:0",
+           "-c:a", "flac", "-sample_fmt", "s16", str(path)]
+    p = subprocess.run(cmd, input=np.clip(a, -1.0, 1.0).tobytes(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if p.returncode != 0:
+        die(f"flac encode failed for {path}: {p.stderr.decode(errors='replace').strip()[:400]}")
+    return Path(path)
+
+
 def ffmpeg_filter_file(src, dst, filters, channels, sr=SR):
     """Decode `src`, run an ffmpeg -af chain, write float32 WAV `dst`."""
     cmd = [ffmpeg_bin(), "-v", "error", "-nostdin", "-y", "-i", str(src), "-ac", str(channels), "-ar", str(sr)]
@@ -805,6 +822,12 @@ def speech_wpm(x, text, sr=SR):
     """Words per minute over the voiced span of a take (screening number, not a verdict)."""
     a, b = voiced_span(x, sr)
     return count_words(text) / max(b - a, 0.1) * 60.0
+
+
+def at_length_limit(duration_s):
+    """True when a take is exactly the multilingual v2 request limit long: its reading was squeezed
+    to fit, so its pace says little about the voice and more takes will not help (split the segment)."""
+    return bool(duration_s) and abs(float(duration_s) - V2_REQUEST_MAX_S) < 0.03
 
 
 def voicing_ratio(x, sr=SR, threshold=0.5):
@@ -1077,6 +1100,51 @@ def _band_profile(x, sr=SR):
             sel = (freqs >= edges[b]) & (freqs < edges[b + 1])
             prof[b] += spec[sel].mean() if sel.any() else 0.0
     return 10 * np.log10(prof / max(len(segs), 1) + 1e-12)
+
+
+def music_activity(x, sr=SR, hop_s=0.5, win_s=1.0):
+    """How busy a piece of music is over time. Per hop: loudness, onsets (positive spectral flux:
+    new notes, swells) and brightness (share above 2 kHz), each ranked within the piece and
+    combined into 0-1 (1 = the busiest moments of this piece), smoothed over about 3 s.
+    Returns (times_s, activity, event_times_s); events are onsets well above the piece's usual."""
+    m = to_mono(x).astype(np.float64)
+    hop, win = int(hop_s * sr), int(win_s * sr)
+    n = max(1, 1 + (len(m) - win) // hop)
+    nfft = 1 << int(math.ceil(math.log2(win)))
+    w = np.hanning(win)
+    hi = np.fft.rfftfreq(nfft, 1.0 / sr) >= 2000.0
+    loud, bright, flux = np.empty(n), np.empty(n), np.zeros(n)
+    prev = None
+    for i in range(n):
+        seg = m[i * hop: i * hop + win]
+        if len(seg) < win:
+            seg = np.pad(seg, (0, win - len(seg)))
+        spec = np.abs(np.fft.rfft(seg * w, nfft))
+        pw = spec ** 2
+        loud[i] = 10.0 * np.log10(pw.mean() + 1e-12)
+        bright[i] = (pw[hi].sum() + 1e-12) / (pw.sum() + 1e-12)
+        logmag = np.log1p(spec * 1e3)
+        if prev is not None:
+            flux[i] = float(np.maximum(logmag - prev, 0.0).mean())
+        prev = logmag
+
+    def rank(v):
+        return np.argsort(np.argsort(v)) / max(1, len(v) - 1)
+
+    act = 0.5 * rank(loud) + 0.35 * rank(flux) + 0.15 * rank(bright)
+    k = max(1, int(round(3.0 / hop_s)))
+    act = np.convolve(np.pad(act, (k // 2, k - 1 - k // 2), mode="edge"), np.ones(k) / k, mode="valid")
+    q1, q3 = np.percentile(flux, [25, 75])
+    thr = float(np.median(flux) + 3.0 * (q3 - q1 + 1e-9))
+    # An event stands out even among the piece's notes: among its strongest 5 percent of onsets and
+    # 1.5 times the local 90th percentile over +-10 s. Regular notes of a sparse figure are texture.
+    r = max(1, int(round(10.0 / hop_s)))
+    local = np.array([np.percentile(flux[max(0, i - r): i + r + 1], 90) for i in range(n)])
+    top = float(np.percentile(flux, 95))
+    events = [round(i * hop_s + win_s / 2, 1) for i in range(1, n - 1)
+              if flux[i] > max(thr, top, 1.5 * local[i]) and flux[i] >= flux[i - 1] and flux[i] >= flux[i + 1]
+              and loud[i] > np.median(loud) - 12]
+    return np.arange(n) * hop_s + win_s / 2, act, events
 
 
 def music_loop_plan(x, crossfade_ms=12000.0, sr=SR, search_s=6.0):

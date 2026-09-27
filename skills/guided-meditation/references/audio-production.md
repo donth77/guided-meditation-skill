@@ -41,7 +41,12 @@ extended if a one-shot needs room to decay).
    plays from the source's start; later passes restart at the chosen point.
 3. **Cover the session** continuously: the bed runs from t=0 to the end whether or not it is
    audible, so muted interludes keep the loop phase and returning music continues the same
-   texture.
+   texture. **Placement** (`--music-offset auto`): the source's activity (loudness, note onsets,
+   brightness) is mapped, and the starting offset is chosen so its calmest stretches sit under
+   speech and its busier moments and loop joins fall in rests; the manifest lists each passage's
+   music as calm, moderate or busier, and any strong musical event under speech. A source at
+   least as long as the session plays straight through with no join. `--music-offset SECONDS`
+   fixes the start (and keeps the file's leading silence, for audio already on the session clock).
 4. **Calibrate**: the loop's loudness is measured and set so cue gain 1.0 sits `--music-db`
    (default -16) below the voice's loudness.
 5. **Envelope**: the script's cues (smoothstep ramps from the current gain), times slow ducking
@@ -52,6 +57,52 @@ extended if a one-shot needs room to decay).
 
 Turn it down with `--music-db -19` (or -22 for sleep); less ducking with `--duck-db -1.5`; a
 busy source needs a new candidate or a stiller prompt, not more EQ.
+
+### Prompts
+
+A prompt that mostly says what to avoid ("steady, no melody, no events, behind the voice") comes
+back as a drone the listener called "a single steady tone, not really music". Name what should be
+there: instruments (soft felt piano, warm pads, slow-attack strings), a key and a slow tempo
+("in D major, 60 BPM"), density ("very sparse, few notes, occasional single piano notes"). Keep
+the avoid-list (drums, vocals, choir, nature sounds, swells, crescendo, busy melody) in the
+negative styles of a composition plan.
+
+### Composed to the session
+
+For music that should follow the cues (enter under the first words, recede, withdraw before a
+silent interlude, return, hold through the closing rest, end), compose it after the narration
+is final:
+
+1. Plan parts on the measured timeline: one Music API request per part, up to 10 minutes each,
+   split where the music is silent anyway (a music-free interlude). Each part is a composition
+   plan of sections of up to 2 minutes (`chunks` with `text`, `duration_ms`, `positive_styles`,
+   `negative_styles`), named and timed to the cues: "[Opening]" until the first fade-in, "[Under
+   the first words]", "[Settling]", "[Receding]" at a partial fade, "[Withdrawal]" at the fade to
+   silence, "[Return under the voice]", "[Closing rest]" sections, "[Ending]". Repeat the same
+   global styles in every section so the parts sound like one piece.
+2. Generate each part: `generate_music.py SESSION --composition-plan music/plan-a.json`.
+3. List the parts in `music/timed.json`: each source, the seconds used, a gain to match the parts'
+   loudness, anchors (a section start in the source and the timeline boundary it belongs on) and
+   the steady sections that may be lengthened or shortened (`stretch_s`). See `fit_music.py
+   --help` for the format.
+4. `fit_music.py SESSION` places the parts: the first anchor of each part sets its start; between
+   two anchors it repeats (or cuts) a stretch of a steady section so the next anchor lands too,
+   with one 8 s crossfade at the pair of points whose rhythm, harmony, level and spectrum match
+   best, always in a rest. It writes `music/fitted.flac` and selects it; `mix.py` plays it from
+   0 s. In testing, joins matched harmony at 0.98 and level within 0.1 dB; listen at each join
+   (the report gives the times).
+
+After a retake moves the timeline, run `assemble_voice.py`, then `fit_music.py` and `mix.py`
+again. Nothing is regenerated. A plan composed before the narration was final drifts from its
+cues by however much the takes change (37 s by the withdrawal in one session).
+
+### Comparing music
+
+`mix.py --music FILE --tag NAME` writes `<slug>.<version>.NAME.<fmt>` and `manifest.NAME.json`
+beside the other versions, so the same narration can be heard with generated, composed and
+licensed music (Suno, royalty-free libraries). Keep licensed files and their licence notes in
+`music/sourced/`. `qa_report.py --tag NAME` checks a tagged mix; run it right after that mix,
+because the stems are shared.
 
 ## SFX
 
@@ -92,7 +143,8 @@ busy source needs a new candidate or a stiller prompt, not more EQ.
 | voice+sfx | voice + sfx | stereo |
 | voice+music+sfx | voice + music + sfx | stereo |
 
-Files: `output/<slug>.<version>.<fmt>` with `+` written as `-` (`rain.voice-music-sfx.mp3`).
+Files: `output/<slug>.<version>.<fmt>` with `+` written as `-` (`rain.voice-music-sfx.mp3`), or
+`<slug>.<version>.<tag>.<fmt>` with `--tag`.
 Formats: `wav` (24-bit PCM), `mp3` (192 kbps stereo, 128 kbps mono), `m4a` (AAC 160 kbps),
 `flac`. Stems in `stems/` are float32, sample-aligned and at mix level, so any version can be
 rebuilt or remixed in a DAW by summing them. `output/manifest.json` records levels, gains,

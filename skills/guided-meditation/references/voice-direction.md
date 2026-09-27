@@ -97,7 +97,9 @@ A model change needs a fresh audition even with the same voice id.
 | What the listener hears | Usual causes | Try |
 | --- | --- | --- |
 | Rushed, clipped, "reading aloud" | naturally fast voice; low stability; long dense passage | a calmer voice; stability 0.5-0.7; shorter sentences in the script; speed 0.9-0.95 at most |
-| Word-by-word, stop-start | speed setting too low; very short passages; some voices simply read this way (the audition's "pauses inside phrases" lists dips of 0.2 s or more between words with no punctuation) | speed back to 1.0; a voice that sounds alike (`voices.py similar`); a conversion (`--convert`); see "Pauses inside phrases" |
+| Word-by-word, stop-start | speed setting too low; very short passages; some voices simply read this way (the audition's "pauses inside phrases" lists dips of 0.2 s or more between words with no punctuation) | speed back to 1.0; a voice that sounds alike (`voices.py similar`); a conversion from a guide voice (see "Conversion") |
+| Passages faster than the audition | stitching context: some voices read continuous narration faster | `--no-context` (a run switches by itself after one fast reading with context) |
+| Hurried passage, last breath clipped | the reading hit the 23.7 s request limit and was squeezed to fit (flagged in `--list`) | split the segment at a sentence boundary; more takes read the same way |
 | Whispering too hard | the voice's source recordings are whispered | a different voice: shortlist previews at 65-80 percent voiced with `voices.py ... --measure`; settings and model changes move it only a few points |
 | Too plain, wants a little breath | a fully voiced narrator | a voice whose preview measures 60-75 percent voiced; or eleven_v3 with `[whispers]` on chosen lines |
 | Accent drifts (e.g. British to American) | model not fine-tuned for the voice; v3 on a voice without a v3 fine-tune; low stability | a fine-tuned model (often multilingual_v2); stability up |
@@ -132,10 +134,36 @@ takes of one opening line:
   (three of three British matches), but the listener heard none of them as calm and British: a
   similar timbre is not a similar character.
 - Conversion (`synthesize.py --convert TAKE --voice-id ID`, speech to speech) keeps the guide's
-  timing and gives it the target's timbre: no breaks, less breathy than the target's own takes
-  (90-94 percent voiced against 77-80), and to this listener neither calm nor British, even from
-  British guides (an earlier conversion from a v3 guide failed the same way). Converted takes
-  cannot be accepted for a full production.
+  timing and gives it the target's timbre: no breaks, but the first guides tried made it plainer
+  than the target's own takes (90-94 percent voiced against 77-80), and to this listener neither
+  calm nor British. A calmer, breathier British guide later made it work: see "Conversion".
+- In a conversion, breathiness and calm come from the guide reading: similarity, stability,
+  style and speaker boost moved it by a point or two, and a whispering guide stays too whispery
+  (a full-whisper guide converted to 61-66 percent voiced; breathy ASMR guides converted plain,
+  90-93, and kept their fast, suspenseful delivery). The one setting that added breath was the
+  English-only model (`--sts-model eleven_english_sts_v2`): 83 percent against 90 for the same
+  guide reading, 75-78 when combined with a softly read guide or the target voice's whisper
+  edition. Choose the guide for calm, unhurried delivery and let the target and model set the breath.
+- Reading each phrase as its own request (four takes each, the cleanest kept) did not help this
+  voice: 36 of 36 takes of nine short phrases broke between words, including "let's begin ...
+  here" in three words. Request length is not the cause; the breaks belong to the voice. The
+  joined phrases also sounded "like multiple phrases were stitched together", so the mode was
+  removed. Sending the text lower-cased changed nothing either.
+- The same voice on eleven_v3, which has no fine-tune for it, broke less (4 breaks in a 38-word
+  passage against about 12 on multilingual v2) but still broke, and read plainer (92-93 percent
+  voiced against 79-84); an earlier production also heard its accent drift on v3.
+- Shortening the voice's own breaks (an edit, keeping 80 ms or a share of each; since removed)
+  worked on one passage with few breaks and failed on the next: with 13-17 breaks in 34 words, full
+  shortening sounded "artificially stitched together and unnaturally sped up" (the voice speaks
+  its words fast and fills the time with breaks), and keeping 45 percent of each still sounded like
+  "pausing after every word". Editing does not rescue a voice whose breaks come every other word.
+- Converting a calm reader into the voice gave the right pace and no breaks; converting into the
+  same creator's whisper edition changed the character completely ("a completely different
+  voice"). Keep the target voice itself.
+- When passages sound rushed, look at the pauses between sentences before the speed. Lowering
+  the guide's speed below its saved value (1.1 to 1.0 or 0.92) did not slow the words but put
+  breaks inside phrases ("that broad sound ... has"); splitting sentences into phrases with
+  content-planned rests gave the calm rhythm without touching the delivery.
 - When the voice is right and only its reading of certain words breaks, what remains is the
   wording or accepting the cadence. Both are the listener's decision; propose, audition, never
   rewrite silently. With the listener's approval, three rewordings were tried: "Let's take a
@@ -155,6 +183,49 @@ takes of one opening line:
 
 Phrase boundaries are a separate matter: pauses the listener wants ("for a minute [pause] beside
 the stream") are rests in the script, inserted by assembly and heard in the audition previews.
+
+## Conversion
+
+When the listener wants one voice's sound and another voice's delivery, a guide voice reads and
+speech to speech re-voices the reading in the chosen voice. The conversion keeps the guide's
+timing exactly (the same length and pauses, so the guide's alignment still applies) and takes the
+target's timbre and accent. What the September 2026 production learned, with a British ASMR
+voice (AImee) whose own readings broke phrases every few words as the target:
+
+- The guide sets pace, pauses, intonation and most of the breath. A guide measuring 83 percent
+  voiced converted to 96 ("the pacing is fine, but it should sound as calm and breathy as AImee");
+  a calm British guide at 72 percent converted to 85 and was accepted. Expect a conversion about
+  10-15 points more voiced than its guide, so pick a guide a little breathier than the target
+  level.
+- The accepted recipe: guide Rainbird on multilingual v2 (stability 0.75, similarity 0.9, style
+  0.15, speed 1.0, read without stitching context, about 94 words per minute), target AImee on
+  `eleven_multilingual_sts_v2` (stability 0.5, similarity 0.75, style 0, speaker boost on). A
+  conversion costs about 10 credits per second of audio; guide readings cost what text to
+  speech costs, so read several and convert one.
+- Converting into the target's whisper edition gave "a completely different voice"; v3 readings of
+  the target lost the British accent; the English-only STS model, an EQ and blended breath made
+  no difference the listener could hear.
+- Breaks in the guide reading carry into the conversion. `synthesize.py` screens every guide
+  reading and converts only one near the accepted pace with at most one short break.
+- Approving passages one at a time before the full run caught pace problems early; a full run
+  whose readings came out rushed had wasted most of its credits.
+
+## Pace and request length
+
+- Stitching context changed one voice's pace more than any setting: Rainbird read the same
+  passages at 121-159 words per minute with previous/next context and 84-108 without, same
+  recipe. AImee, Paula and Clara read at their audition pace with context. The listener heard the
+  fast readings as "way too fast"; the audition, generated without context, had been right. So
+  `synthesize.py` drops context for the rest of a run once a reading with it comes out faster
+  than the accepted pace, and `--no-context` drops it from the start.
+- The listener asked for about 100 words per minute on this script; the accepted audition
+  measured 94 (`speech_wpm` includes the voice's own pauses between sentences).
+- One multilingual v2 request never returned more than 23.684 s: 34 of 174 readings, of 32-42
+  words, came back exactly that long. Every word was there, but the reading was squeezed to fit:
+  the same guide read a 33-word passage at 84 words per minute and a 42-word one at 108, both
+  23.684 s, and the last word ended 0.2 s before the end of the file instead of about 1 s. Keep a
+  segment's reading under about 20 s (roughly 30 words at a meditation pace).
+  `validate_script.py` warns before synthesis and `synthesize.py --list` flags takes at the limit.
 
 ## Lessons from earlier productions
 

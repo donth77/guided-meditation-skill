@@ -31,15 +31,16 @@ material from an earlier project), `meditations/` (session folders with audio, o
 | Script | Purpose |
 | --- | --- |
 | `check_setup.py` | tools, key, tier, credits, billing status, output formats, models; `--probe` makes one tiny TTS request (~20 credits) |
-| `voices.py` | `mine`, `suggest`, `library`, `similar` (library voices that sound like an audio file), `show`, `preview`, `add`; `--measure` / `--voiced MIN-MAX` screen previews for breathiness |
-| `validate_script.py` | every script rule, timing estimate, credit estimate; `--write` fills the timing block |
+| `voices.py` | `mine`, `suggest`, `library`, `similar` (library voices that sound like an audio file), `show`, `preview`, `add`, `design` / `create` (Voice Design previews; `create` uses a voice slot); `--measure` / `--voiced MIN-MAX` screen previews for breathiness |
+| `validate_script.py` | every script rule, timing estimate, credit estimate (conversion included), segments that may pass the request length limit; `--write` fills the timing block |
 | `render_script.py` | script.md, script.txt, timing.md (estimated, then measured after assembly) |
-| `synthesize.py` | `--audition` (one or several voice ids; writes `.preview.mp3` with the script's rests), `--accept`, passage takes with request stitching, `--takes N --pick`, `--retake`, `--select`, `--freeze`, `--list`, `--preview`, `--rescreen`, `--convert` (speech to speech, auditions only), `--lowercase` |
+| `synthesize.py` | `--audition` (one or several voice ids; writes `.preview.mp3` with the script's rests), `--accept`, passage takes with request stitching (dropped for the rest of a run when a reading with it runs fast; `--no-context`), `--takes N --pick` (stops at the first reading within `--pace-tolerance`), `--retake`, `--select`, `--freeze`, `--list`, `--preview`, `--rescreen`, `--convert` (speech to speech). Accepting a conversion makes voice.json a guide + target recipe: guide readings in `voice/guides/`, only a good one converted (`--convert-guide SEG:TAKE`, `--force-convert`). Flags takes at the 23.7 s request limit |
 | `assemble_voice.py` | voice-track.wav + timeline.json; splits only at phrase boundaries, counts the natural pause and inserts only the missing rest; `preview()` is reused for audition previews |
-| `generate_music.py` | Eleven Music candidates, `--select`, `--plan-only`, `bad_prompt` suggestions |
+| `generate_music.py` | Eleven Music candidates from the prompt or `--composition-plan`, `--select`, `--plan-only`, `bad_prompt` suggestions |
+| `fit_music.py` | composed parts (`music/timed.json`: sources, anchors, stretchable sections) placed on the measured timeline with joins in rests -> `music/fitted.flac`, selected; rerun after retakes |
 | `generate_sfx.py` | ambience loop takes and one-shots |
-| `mix.py` | stems and the four versions: looping, cue envelopes, ducking, loudness, peak ceiling, `--limit` |
-| `qa_report.py` | file, loudness, timing, cue and silence checks; `--transcribe` word diff (paid); listening checklist |
+| `mix.py` | stems and the four versions: placement (`--music-offset`), looping or straight-through play, cue envelopes, ducking, loudness, peak ceiling, `--limit`; `--music FILE --tag NAME` for side-by-side music versions |
+| `qa_report.py` | file, loudness, timing, cue and silence checks; `--transcribe` word diff (paid); listening checklist; `--tag NAME` for a tagged mix (run right after it: stems are shared) |
 | `pipeline.py` | runs the remaining phases in order; plan and cost only unless `--yes`; `--mock` |
 
 ## Session folder
@@ -48,17 +49,20 @@ material from an earlier project), `meditations/` (session folders with audio, o
 meditations/<slug>/
   brief.md  script.json  script.md  script.txt  timing.md  voice.json  ledger.jsonl
   voice/    audition/take-NNNN.mp3 (+.json recipe and screening, .alignment.json, .preview.mp3)
-            passages/<seg>/take-NN.mp3 (+.json, .alignment.json)
+            guides/<seg>/take-NN.mp3 (conversion recipe: the guide voice's readings)
+            passages/<seg>/take-NN.mp3 (+.json, .alignment.json, .preview.mp3)
             selection.json  voice-track.wav  timeline.json
-  music/    source-NN.mp3 (+.json)  selection.json
+  music/    source-NN.mp3 (+.json)  selection.json  plan-*.json  timed.json  fitted.flac (+.json)
+            sourced/ (licensed files and their licence notes)
   sfx/      ambience-NN.mp3  one-shots/SNN-NN.mp3  selection.json
   stems/    voice.wav music.wav sfx.wav (sample-aligned, at mix level)
-  output/   <slug>.voice|.voice-music|.voice-sfx|.voice-music-sfx .wav/.mp3, manifest.json
-  qa/       report.md, report.json, transcripts/
+  output/   <slug>.voice|.voice-music|.voice-sfx|.voice-music-sfx[.<tag>] .wav/.mp3, manifest[.<tag>].json
+  qa/       report[.<tag>].md, report[.<tag>].json, transcripts/
 ```
 
 `voice.json` is the accepted recipe (voice, model, settings, seed, format, measured pace and
-voiced share of the accepted audition). `timeline.json` is the measured clock every music and
+voiced share of the accepted audition); for a conversion it also holds the `guide` voice that
+reads, and `method: speech_to_speech`. `timeline.json` is the measured clock every music and
 SFX cue resolves against.
 
 ## Conventions

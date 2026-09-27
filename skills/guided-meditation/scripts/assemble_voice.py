@@ -26,12 +26,13 @@ from __future__ import annotations
 
 import argparse
 import math
+import re
 
 import numpy as np
 
 from gm_common import (
-    SR, WavWriter, align_map, count_words, decode_audio, die, fmt_time, format_pauses, is_v3, level_db, load_script,
-    now_iso,
+    SR, V2_REQUEST_MAX_S, WavWriter, align_map, at_length_limit, count_words, decode_audio, die, fmt_time,
+    format_pauses, is_v3, level_db, load_script, now_iso,
     quiet_threshold, read_json, runs, segment_request, session_pads, session_root, sha256_file, spoken_mask, warn,
     write_json,
 )
@@ -219,6 +220,23 @@ def analyze(x, meta, alignment, n_phrases, pauses_ms, args, sr=SR):
             if g >= args.internal_gap_ms / 1000:
                 notes.append(f"phrase {i + 1}: {g:.2f}s silence inside the phrase at {fr.center(A + rs):.2f}s "
                              "(a misplaced gap? listen, retake the passage if it sounds broken)")
+    # Sentences the voice runs together inside one phrase: candidates for a phrase boundary with a rest.
+    if alignment and alignment.get("characters"):
+        st, en = alignment["character_start_times_seconds"], alignment["character_end_times_seconds"]
+        mapping = align_map(text, alignment["characters"])
+        for a, b in spans:
+            for m in re.finditer(r"[.?!]\s+(?=\S)", text[a:b]):
+                i, j = a + m.start(), a + m.end()
+                k = next((q for q in range(i - 1, a - 1, -1) if text[q].isalnum()), None)
+                if k is None or mapping[k] is None or mapping[j] is None:
+                    continue
+                t0, t1 = float(en[mapping[k]]) - 0.15, float(st[mapping[j]]) + 0.15
+                A, B = fr.span(t0, t1)
+                gap = max(((r1 - r0) * fr.hop / sr for r0, r1 in runs(fr.quiet[A:B])), default=0.0)
+                if gap < args.sentence_gap_ms / 1000:
+                    left = " ".join(text[a:i + 1].split()[-3:])
+                    notes.append(f"sentences run together after \"{left}\" ({gap:.2f}s pause): a phrase boundary with "
+                                 "a rest would give the thought room")
     clipped = int(np.sum(np.abs(x) >= 0.999))
     if clipped:
         notes.append(f"{clipped} clipped samples in the take")
@@ -268,7 +286,7 @@ def render_segment(x, an, sr=SR):
 def preview(x, meta, alignment, seg, sr=SR):
     """One take with its segment's phrase rests inserted and its edges trimmed as assembly
     would: how an audition will sit in the voice track. Returns (audio, analysis)."""
-    args = argparse.Namespace(lead_keep_ms=1500.0, tail_keep_ms=1000.0, internal_gap_ms=1200.0)
+    args = argparse.Namespace(lead_keep_ms=1500.0, tail_keep_ms=1000.0, internal_gap_ms=1200.0, sentence_gap_ms=800.0)
     pauses = [float(p.get("pause_after_ms", 0)) for p in seg["phrases"][:-1]]
     an = analyze(x, meta, alignment, len(seg["phrases"]), pauses, args, sr)
     audio, _ = render_segment(x, an, sr)
@@ -284,6 +302,8 @@ def main():
                     help="audible material kept after a segment's last word; default 1000")
     ap.add_argument("--internal-gap-ms", type=float, default=1200.0,
                     help="flag silences this long inside a phrase; default 1200")
+    ap.add_argument("--sentence-gap-ms", type=float, default=800.0,
+                    help="flag full stops inside a phrase where the voice pauses less than this; default 800")
     args = ap.parse_args()
 
     root = session_root(args.session)
@@ -304,10 +324,12 @@ def main():
         if not meta:
             die(f"segment {sid}: {entry['take']}.json is missing")
         mock |= bool(meta.get("mock"))
-        current, _ = segment_request(seg, is_v3(meta.get("model_id")))
+        current, spans_now = segment_request(seg, is_v3(meta.get("model_id")))
         if current != meta.get("text"):
             warn(f"segment {sid}: the script text changed after {entry['take']} was generated; the take's own "
                  f"text is used. Retake it if the words matter (synthesize.py --segments {sid} --retake)")
+        else:
+            meta["phrase_spans"] = spans_now     # same words: the script's current phrasing applies, no retake
         alignment = read_json(folder / meta["alignment_file"]) if meta.get("alignment_file") else None
         gap_note = [f"pauses inside phrases: {format_pauses(meta['inner_pauses'])}"
                     " (word-by-word delivery? listen; retake the passage if it drags)"] if meta.get("inner_pauses") else []
@@ -315,6 +337,9 @@ def main():
         pauses = [float(p.get("pause_after_ms", 0)) for p in seg["phrases"][:-1]]
         an = analyze(x, meta, alignment, len(seg["phrases"]), pauses, args)
         an["notes"] += gap_note
+        if at_length_limit(meta.get("duration_s")):
+            an["notes"].append(f"the reading fills the {V2_REQUEST_MAX_S:.1f}s request limit, so it was squeezed to fit "
+                               "(listen for a hurried pace; a shorter segment reads freely)")
         loaded.append((seg, entry, meta, x, an))
 
     # Fit each segment rest (word to word) around the material kept at the edges.

@@ -14,6 +14,7 @@ Base URL `https://api.elevenlabs.io` (override with `ELEVENLABS_API_BASE`), head
 | generate_music | `POST /v1/music/plan` | composition plan from a prompt (`--plan-only`) |
 | generate_sfx | `POST /v1/sound-generation?output_format=` | `text, duration_seconds (0.5-30), prompt_influence (0-1, default 0.3), loop (bool), model_id eleven_text_to_sound_v2` |
 | synthesize `--convert` | `POST /v1/speech-to-speech/{voice_id}?output_format=` (multipart) | `audio`, `model_id` (`eleven_multilingual_sts_v2`, `eleven_english_sts_v2`), `voice_settings` (JSON string), `seed`, `remove_background_noise`; returns audio of the same duration as the input, so the guide's alignment still applies |
+| voices `design` / `create` | `POST /v1/text-to-voice/design`, `POST /v1/text-to-voice` | `voice_description`, `text` (100-1000 chars), `model_id` (`eleven_ttv_v3`, `eleven_multilingual_ttv_v2`), `seed`, `guidance_scale`; returns three previews with `generated_voice_id`; `create` saves one (`voice_name`, `voice_description`, `generated_voice_id`) and takes a voice slot. Charged one credit per preview character, once, with no cost header |
 | voices `similar` | `POST /v1/similar-voices` (multipart) | `audio_file`, `top_k`, `similarity_threshold`; returns library voices, most similar first; free |
 | qa_report | `POST /v1/speech-to-text` (multipart) | `model_id scribe_v2, file, language_code, timestamps_granularity=word`; returns `text` and `words` |
 | voices | `GET /v2/voices`, `GET /v1/voices/{id}`, `GET /v1/shared-voices`, `POST /v1/voices/add/{owner}/{voice}` | `fine_tuning.state` per model, `high_quality_base_model_ids`, saved `settings`, `verified_languages` |
@@ -31,6 +32,11 @@ continuous prosody. Rules: at most 3 each; the ids must be under two hours old (
 the ids and `previous_text`/`next_text` (HTTP 400 `unsupported_model`, confirmed live), so v3
 passages are generated without context. The scripts only use ids from takes with the same voice and model, and never use the id
 of a take that the same run is about to replace.
+
+Context can change the pace. One library voice read the same passages 40-60 percent faster with
+context (ids or text) than without; three others were unaffected. Auditions are generated
+without context, so `synthesize.py` stops sending it for the rest of a run once a reading with
+context comes out faster than the accepted audition (`--no-context` from the start).
 
 ## Output formats and tiers
 
@@ -51,10 +57,17 @@ of a take that the same run is about to replace.
 Speed 0.7-1.2. eleven_v3 stability is one of 0.0, 0.5, 1.0. SSML `<break>` tags work only on v2
 models and destabilize long generations; this skill never uses them.
 
+Audio length (observed, September 2026): no eleven_multilingual_v2 request returned more than
+23.684 s. Of 174 readings of up to 245 characters, 34 came back exactly that long: all words
+present, the pace squeezed to fit, the last breath clipped. Longer texts were not tested. A
+speech-to-speech conversion returns the length of its input, so it inherits the limit from its
+guide reading. v3 readings ran to 25.8 s. `validate_script.py` warns about segments that may
+reach the limit; `synthesize.py` flags takes that did (`at_length_limit` in the take's JSON).
+
 ## Costs
 
-Estimates use documented rates; the charge is in the `character-cost` header. Observed on a
-Starter account in September 2026: multilingual_v2 charged 0.5 credits per character (half the
+Estimates use documented rates; the charge is in the `character-cost` header. Observed on
+Starter and Creator accounts in September 2026: multilingual_v2 charged 0.5 credits per character (half the
 documented multiplier), sound effects 10 credits per second (documented: 40 per second when a
 duration is given), speech to speech 10 credits per second of input (estimated at 1,000 per
 minute), music about 700-900 credits per generated minute (no cost header). Plans
