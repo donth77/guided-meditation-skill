@@ -45,7 +45,6 @@ import json
 import random
 import re
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 
@@ -55,9 +54,9 @@ from gm_common import (
     ApiError, SR, api_json, api_key, api_request, at_length_limit, check_budget, count_words, decode_audio,
     default_output_format, die, fail_api, format_pauses, get_models, get_subscription, header_credits, inner_pauses,
     is_account_blocker, is_v3, ledger, load_script, log_usage, multipart, now_iso, now_unix, probe_duration, read_json,
-    REQUEST_ID_MAX_AGE_S, save_api_audio, segment_request, session_root, sha256_file, speech_wpm, STS_CREDITS_PER_MINUTE,
-    strip_tags, trim_digital_silence, tts_rate, V2_REQUEST_MAX_S, voicing_ratio, warn, write_json, write_mp3,
-    write_wav_f32,
+    REQUEST_ID_MAX_AGE_S, run_tool, save_api_audio, segment_request, session_root, sha256_file, speech_wpm,
+    STS_CREDITS_PER_MINUTE, strip_tags, trim_digital_silence, tts_rate, V2_REQUEST_MAX_S, voicing_ratio, warn, write_json,
+    write_mp3, write_wav_f32,
 )
 
 DEFAULT_SETTINGS = {"stability": 0.5, "similarity_boost": 0.75, "style": 0.0, "use_speaker_boost": True, "speed": 1.0}
@@ -240,7 +239,7 @@ def _system_tts(text, sr):
             cmd = [shutil.which("espeak-ng") or shutil.which("espeak"), "-s", "150", "-w", str(out), text]
         else:
             return None
-        if subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+        if run_tool(cmd).returncode != 0:
             return None
         return decode_audio(out, sr, 1)[:, 0]
 

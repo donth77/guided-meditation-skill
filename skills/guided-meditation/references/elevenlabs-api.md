@@ -2,7 +2,10 @@
 
 What the scripts call, with limits, costs and failure modes. Checked against the API reference
 and live calls in September 2026; `check_setup.py` shows the live account and model list.
-Base URL `https://api.elevenlabs.io` (override with `ELEVENLABS_API_BASE`), header `xi-api-key`.
+Base URL `https://api.elevenlabs.io` (override with `ELEVENLABS_API_BASE`; https only, because the
+key is sent to it), header `xi-api-key`. The key comes from the environment or a `.env`: only
+`ELEVENLABS_API_KEY` is read from the file, and the key is not handed on to ffmpeg or the other
+programs the scripts start.
 
 ## Endpoints used
 

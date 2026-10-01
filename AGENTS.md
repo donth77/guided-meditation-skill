@@ -76,8 +76,16 @@ SFX cue resolves against.
 - Python 3.9+, standard library plus numpy; audio through ffmpeg/ffprobe subprocesses. Each script
   has inline `# /// script` metadata so `uv run` works without setup.
 - Shared code lives in `scripts/gm_common.py`: API client (retries, error explanations,
-  multipart), audio I/O, level and voice measures (`voicing_ratio`, `inner_pauses`,
-  `quiet_threshold`), envelopes, loop planning, script helpers. Extend it instead of duplicating.
+  multipart), the launcher for other programs, audio I/O, level and voice measures
+  (`voicing_ratio`, `inner_pauses`, `quiet_threshold`), envelopes, loop planning, script helpers.
+  Extend it instead of duplicating.
+- Other programs start in one place: `run_tool` and `open_tool` (ffmpeg, ffprobe, the mock voice)
+  and `run_script` (the sibling scripts `pipeline.py` chains), all in `gm_common.py`. They take
+  argument lists, never a shell command line, run only that fixed set of programs, and leave the
+  API key out of the environment of everything but the sibling scripts. No other script imports
+  `subprocess`.
+- The API key is read from the environment or from `ELEVENLABS_API_KEY` in a `.env` (nothing else
+  in the file is used) and is sent only to the API base, which must be https.
 - Paid calls print an estimate, support `--dry-run` and `--max-credits`, check remaining credits,
   and append to the session's `ledger.jsonl` with the charge from the `character-cost` header.
   Estimates use documented rates and usually overstate the real charge.
@@ -113,3 +121,24 @@ quirks (v3 refuses stitching context, library voices work by id without being ad
 are in `references/elevenlabs-api.md`.
 
 `evals/evals.json` holds prompts with expected outputs for evaluating the skill end to end.
+
+## Security scan
+
+The listing on skillsdirectory.com grades the skill with a static scanner: one finding per rule
+per file, 25 points off for a critical finding, 15 for high, 8 for medium, and 75 is a B. Its
+methodology says only SKILL.md counts, but at submission (October 2026) the listing also counted
+the scripts, so keep them to the one finding that cannot go: process execution in `gm_common.py`
+(critical; the skill runs ffmpeg). What it matched before, and what to avoid:
+
+- `subprocess.run(` / `subprocess.call(` in five scripts: start programs through `gm_common.py`.
+- `shutil.rmtree(` in `mix.py`: scratch folders come from `tempfile.TemporaryDirectory`.
+- `pip install` in an error message, read as installing packages at run time: no package-manager
+  commands in the scripts' text.
+
+```bash
+# gm_common.py should be the only file listed
+grep -lE "subprocess|rmtree|(pip|npm) install" skills/guided-meditation/scripts/*.py
+```
+
+https://www.skillsdirectory.com/security/scan shows the grade and the findings per file: the
+repo link scans what is published, a ZIP of the skill folder what a push would be graded as.

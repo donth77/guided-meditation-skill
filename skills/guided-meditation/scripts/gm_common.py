@@ -1,7 +1,8 @@
 """
 GM COMMON
 Shared helpers for the guided-meditation scripts: .env loading, the ElevenLabs REST client and
-error explanations, ffmpeg audio I/O, loudness measurement, float WAV streaming, gain envelopes,
+error explanations, the one launcher for external programs (ffmpeg, ffprobe, the mock voice, the
+sibling scripts), ffmpeg audio I/O, loudness measurement, float WAV streaming, gain envelopes,
 loop construction, and script/timeline helpers.
 
 Imported by the sibling scripts (a script's own folder is on sys.path when it runs); not run
@@ -30,7 +31,7 @@ from pathlib import Path
 try:
     import numpy as np
 except ImportError:  # pragma: no cover - environment problem, reported plainly
-    sys.stderr.write("error: numpy is required (pip install numpy), or run the script with `uv run`.\n")
+    sys.stderr.write("error: numpy is required: install numpy for this Python, or run the script with `uv run`.\n")
     raise SystemExit(1)
 
 SR = 44100
@@ -231,8 +232,9 @@ def _parse_env_file(path):
 
 
 def load_dotenv(*start_dirs):
-    """Load the nearest .env above each start folder (and the working directory).
-    Variables already in the environment win. Returns the files read."""
+    """Take ELEVENLABS_API_KEY from the nearest .env above each start folder (and the working
+    directory); nothing else in those files is used. A key already in the environment wins.
+    Returns the files read."""
     found = []
     for d in [*start_dirs, Path.cwd()]:
         if d is None:
@@ -247,8 +249,9 @@ def load_dotenv(*start_dirs):
                     found.append(f)
                 break
     for f in found:
-        for k, v in _parse_env_file(f).items():
-            os.environ.setdefault(k, v)
+        key = _parse_env_file(f).get("ELEVENLABS_API_KEY")
+        if key:
+            os.environ.setdefault("ELEVENLABS_API_KEY", key)
     return found
 
 
@@ -329,6 +332,9 @@ def api_request(method, path, *, key, body=None, query=None, raw=None, content_t
                 accept="application/json", timeout=600, retries=3):
     """One ElevenLabs REST call. Returns (bytes, lower-cased headers). Retries 429/5xx and
     network errors with backoff; raises ApiError otherwise."""
+    base = urllib.parse.urlsplit(API_BASE)
+    if base.scheme != "https" and base.hostname not in ("localhost", "127.0.0.1", "::1"):
+        die(f"ELEVENLABS_API_BASE must be an https address, not {API_BASE}: the API key is sent to it")
     url = API_BASE + path
     if query:
         q = {k: v for k, v in query.items() if v is not None}
@@ -557,7 +563,14 @@ def check_budget(estimate, max_credits, key, what):
     return int(sub.get("character_count") or 0)
 
 
-# ----------------------------------------------------------------------------- audio I/O
+# ----------------------------------------------------------------------------- external programs
+
+# The one place these scripts start another program: ffmpeg and ffprobe for audio, the system
+# speech synthesiser for --mock rehearsals, and the sibling scripts pipeline.py chains. Arguments
+# are always a list handed straight to the program, never a command line for a shell to parse.
+TOOLS = ("ffmpeg", "ffprobe", "say", "espeak-ng", "espeak")
+SCRIPTS_DIR = Path(__file__).resolve().parent
+
 
 def ffmpeg_bin(name="ffmpeg"):
     b = shutil.which(name)
@@ -566,11 +579,50 @@ def ffmpeg_bin(name="ffmpeg"):
     return b
 
 
+def _tool_args(cmd):
+    if isinstance(cmd, (str, bytes)) or not cmd:
+        raise TypeError("an external program takes a list of arguments")
+    args = [str(a) for a in cmd]
+    if Path(args[0]).stem.lower() not in TOOLS:
+        raise ValueError(f"{args[0]} is not a program these scripts run ({', '.join(TOOLS)})")
+    return args
+
+
+def _tool_env():
+    """The environment without the API key: only the HTTP client needs it."""
+    return {k: v for k, v in os.environ.items() if k != "ELEVENLABS_API_KEY"}
+
+
+def run_tool(cmd, *, input=None, text=False):
+    """Run ffmpeg, ffprobe or the system speech synthesiser and wait for it. Returns the completed
+    process with stdout and stderr captured (str when `text`, else bytes)."""
+    return subprocess.run(_tool_args(cmd), input=input, stdin=None if input is not None else subprocess.DEVNULL,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=text,
+                          errors="replace" if text else None, env=_tool_env())
+
+
+def open_tool(cmd):
+    """Start one of TOOLS with stdout and stderr piped, for reading its output in blocks."""
+    return subprocess.Popen(_tool_args(cmd), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, env=_tool_env())
+
+
+def run_script(name, *args):
+    """Run a sibling script with this interpreter, its output going straight to the terminal
+    (pipeline.py chains the phases this way). Returns the exit code."""
+    path = SCRIPTS_DIR / name
+    if Path(name).name != name or path.suffix != ".py" or not path.is_file():
+        raise ValueError(f"{name} is not one of this skill's scripts")
+    return subprocess.call([sys.executable, str(path), *[str(a) for a in args]])
+
+
+# ----------------------------------------------------------------------------- audio I/O
+
 def decode_audio(path, sr=SR, channels=1):
     """Decode any audio file to float32 [frames, channels] at `sr` with ffmpeg."""
     cmd = [ffmpeg_bin(), "-v", "error", "-nostdin", "-i", str(path), "-f", "f32le",
            "-acodec", "pcm_f32le", "-ac", str(channels), "-ar", str(sr), "-"]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p = run_tool(cmd)
     if p.returncode != 0:
         die(f"ffmpeg could not decode {path}: {p.stderr.decode(errors='replace').strip()[:400]}")
     a = np.frombuffer(p.stdout, dtype="<f4")
@@ -582,7 +634,7 @@ def iter_decode(path, sr=SR, channels=1, block=BLOCK):
     """Stream-decode a file in float32 blocks of [frames, channels]."""
     cmd = [ffmpeg_bin(), "-v", "error", "-nostdin", "-i", str(path), "-f", "f32le",
            "-acodec", "pcm_f32le", "-ac", str(channels), "-ar", str(sr), "-"]
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p = open_tool(cmd)
     want = 4 * channels * block
     try:
         while True:
@@ -603,7 +655,7 @@ def iter_decode(path, sr=SR, channels=1, block=BLOCK):
 def probe_duration(path):
     cmd = [ffmpeg_bin("ffprobe"), "-v", "error", "-show_entries", "format=duration",
            "-of", "default=noprint_wrappers=1:nokey=1", str(path)]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    p = run_tool(cmd, text=True)
     try:
         return float(p.stdout.strip())
     except ValueError:
@@ -614,7 +666,7 @@ def probe_stream(path):
     cmd = [ffmpeg_bin("ffprobe"), "-v", "error", "-select_streams", "a:0", "-show_entries",
            "stream=codec_name,sample_rate,channels,bit_rate:format=duration,bit_rate",
            "-of", "json", str(path)]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    p = run_tool(cmd, text=True)
     try:
         d = json.loads(p.stdout)
     except ValueError:
@@ -719,7 +771,7 @@ def write_mp3(path, data, sr=SR, bitrate="192k"):
     ch = 1 if a.ndim == 1 else a.shape[1]
     cmd = [ffmpeg_bin(), "-v", "error", "-nostdin", "-y", "-f", "f32le", "-ar", str(sr), "-ac", str(ch), "-i", "pipe:0",
            "-c:a", "libmp3lame", "-b:a", bitrate, str(path)]
-    p = subprocess.run(cmd, input=np.clip(a, -1.0, 1.0).tobytes(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p = run_tool(cmd, input=np.clip(a, -1.0, 1.0).tobytes())
     if p.returncode != 0:
         die(f"mp3 encode failed for {path}: {p.stderr.decode(errors='replace').strip()[:400]}")
     return Path(path)
@@ -732,7 +784,7 @@ def write_flac(path, data, sr=SR):
     ch = 1 if a.ndim == 1 else a.shape[1]
     cmd = [ffmpeg_bin(), "-v", "error", "-nostdin", "-y", "-f", "f32le", "-ar", str(sr), "-ac", str(ch), "-i", "pipe:0",
            "-c:a", "flac", "-sample_fmt", "s16", str(path)]
-    p = subprocess.run(cmd, input=np.clip(a, -1.0, 1.0).tobytes(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p = run_tool(cmd, input=np.clip(a, -1.0, 1.0).tobytes())
     if p.returncode != 0:
         die(f"flac encode failed for {path}: {p.stderr.decode(errors='replace').strip()[:400]}")
     return Path(path)
@@ -744,7 +796,7 @@ def ffmpeg_filter_file(src, dst, filters, channels, sr=SR):
     if filters:
         cmd += ["-af", ",".join(filters)]
     cmd += ["-c:a", "pcm_f32le", str(dst)]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    p = run_tool(cmd, text=True)
     if p.returncode != 0:
         die(f"ffmpeg filter failed for {src}: {p.stderr.strip()[:400]}")
     return Path(dst)
@@ -779,7 +831,7 @@ def measure_loudness(path=None, *, inputs=None, filter_complex=None, dualmono=Fa
     else:
         cmd += ["-i", str(path), "-filter_complex", ebu]
     cmd += ["-f", "null", "-"]
-    p = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, errors="replace")
+    p = run_tool(cmd, text=True)
     if p.returncode != 0:
         die(f"loudness measurement failed: {p.stderr.strip()[-400:]}")
     return _parse_ebur128(p.stderr)

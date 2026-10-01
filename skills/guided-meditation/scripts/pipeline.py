@@ -21,22 +21,16 @@ full run, and the finished versions are listened to before they are called done.
 from __future__ import annotations
 
 import argparse
-import subprocess
-import sys
-from pathlib import Path
 
 from gm_common import (
     MUSIC_CREDITS_PER_MINUTE, SFX_CREDITS_PER_SECOND, die, estimated_timeline, fmt_time, is_v3, layers_for,
-    load_script, parse_outputs, read_json, segment_request, session_root, tts_rate,
+    load_script, parse_outputs, read_json, run_script, segment_request, session_root, tts_rate,
 )
-
-HERE = Path(__file__).resolve().parent
 
 
 def run(script, *argv):
-    cmd = [sys.executable, str(HERE / script), *[str(a) for a in argv]]
     print(f"\n$ {script} {' '.join(str(a) for a in argv[1:])}", flush=True)
-    code = subprocess.call(cmd)
+    code = run_script(script, *argv)
     if code not in (0,):
         raise SystemExit(code)
 
@@ -123,9 +117,8 @@ def main():
     run("mix.py", root, "--outputs", ",".join(variants), "--formats", args.formats, "--lufs", args.lufs,
         "--normalize", args.normalize, *(["--limit"] if args.limit else []))
     run("render_script.py", root)
-    qa = [sys.executable, str(HERE / "qa_report.py"), str(root)] + (["--transcribe"] if args.transcribe and not args.mock else [])
     print("\n$ qa_report.py", flush=True)
-    code = subprocess.call(qa)
+    code = run_script("qa_report.py", root, *(["--transcribe"] if args.transcribe and not args.mock else []))
     manifest = read_json(root / "output" / "manifest.json") or {}
     print(f"\n{manifest.get('title', root.name)}: {fmt_time(manifest.get('duration_s'))}")
     for v, d in (manifest.get("variants") or {}).items():

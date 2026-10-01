@@ -24,7 +24,6 @@ import argparse
 import json
 import platform
 import shutil
-import subprocess
 import sys
 from datetime import datetime
 
@@ -32,7 +31,7 @@ import numpy as np
 
 from gm_common import (
     ApiError, api_json, api_key, api_request, credits_remaining, explain_api_error, get_models, load_dotenv,
-    tier_level,
+    run_tool, tier_level,
 )
 
 FILTERS = ("ebur128", "amerge", "pan", "acompressor", "equalizer", "highpass", "highshelf", "volume")
@@ -43,10 +42,10 @@ def ffmpeg_caps():
     out = {"ffmpeg": shutil.which("ffmpeg"), "ffprobe": shutil.which("ffprobe")}
     if not out["ffmpeg"]:
         return out
-    v = subprocess.run(["ffmpeg", "-hide_banner", "-version"], capture_output=True, text=True).stdout.splitlines()
+    v = run_tool(["ffmpeg", "-hide_banner", "-version"], text=True).stdout.splitlines()
     out["version"] = v[0] if v else "?"
-    f = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True).stdout
-    e = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, text=True).stdout
+    f = run_tool(["ffmpeg", "-hide_banner", "-filters"], text=True).stdout
+    e = run_tool(["ffmpeg", "-hide_banner", "-encoders"], text=True).stdout
     out["missing_filters"] = [x for x in FILTERS if f" {x} " not in f]
     out["missing_encoders"] = [x for x in ENCODERS if f" {x} " not in e]
     return out

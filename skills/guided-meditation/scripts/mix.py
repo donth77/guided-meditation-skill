@@ -27,8 +27,7 @@ identical in each. Final balance needs listening; these are starting values.
 from __future__ import annotations
 
 import argparse
-import shutil
-import subprocess
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -37,8 +36,8 @@ from gm_common import (
     BLOCK, SR, Envelope, PieceStream, WavWriter, cue_envelope, db_to_gain, die, duck_envelope, ffmpeg_bin,
     ffmpeg_filter_file, fmt_time, layers_for, level_db, load_script, measure_loudness, merge_windows,
     music_activity, music_free_windows, music_loop_plan, now_iso, open_wav_f32, parse_outputs, probe_duration, read_json,
-    resolve_anchor, seamless_loop_plan, session_root, sha256_file, slug_of, trim_digital_silence, variant_slug, warn,
-    write_json, write_wav_f32,
+    resolve_anchor, run_tool, seamless_loop_plan, session_root, sha256_file, slug_of, trim_digital_silence, variant_slug,
+    warn, write_json, write_wav_f32,
 )
 
 MUSIC_FILTERS = ["highpass=f=40", "equalizer=f=3000:t=q:w=0.9:g=-3", "highshelf=f=9000:g=-1.5",
@@ -377,7 +376,7 @@ def encode(inputs, graph, gain_db, out, title, mono, limit_db=None):
         die(f"unsupported format {ext} (wav, mp3, m4a, flac)")
     cmd += ["-ar", str(SR), "-metadata", f"title={title}", "-metadata", "comment=Guided meditation made with ElevenLabs",
             str(out)]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    p = run_tool(cmd, text=True)
     if p.returncode != 0:
         die(f"ffmpeg encode failed for {out.name}: {p.stderr.strip()[:400]}")
 
@@ -424,10 +423,15 @@ def main():
     formats = [f.strip().lower().lstrip(".") for f in args.formats.split(",") if f.strip()]
     slug = slug_of(script, root)
     title = script.get("title") or slug
-    stems, work, outdir = root / "stems", root / "stems" / ".work", root / "output"
+    stems, outdir = root / "stems", root / "output"
     tag = f".{args.tag}" if args.tag else ""
-    work.mkdir(parents=True, exist_ok=True)
+    stems.mkdir(exist_ok=True)
     outdir.mkdir(exist_ok=True)
+    # Intermediate files go in a scratch folder under stems/ that is removed when the mix ends,
+    # finished or not; --keep-work writes them to stems/.work and leaves them there.
+    scratch = None if args.keep_work else tempfile.TemporaryDirectory(prefix=".work-", dir=stems)
+    work = Path(scratch.name) if scratch else stems / ".work"
+    work.mkdir(exist_ok=True)
     report = {"warnings": [], "mock": bool(timeline.get("mock"))}
 
     voice_path = root / "voice" / "voice-track.wav"
@@ -496,8 +500,11 @@ def main():
             "true_peak_dbtp": None if tp is None else round(min(tp, args.peak) if args.limit else tp, 1),
             "limited": bool(args.limit and tp is not None and tp > args.peak),
             "loudness_range_lu": m["LRA"], "channels": 1 if graph is None else 2}
-    if not args.keep_work:
-        shutil.rmtree(work, ignore_errors=True)
+    if scratch:
+        try:
+            scratch.cleanup()
+        except OSError as e:
+            warn(f"could not remove {work}: {e}")
     manifest = {"title": title, "slug": slug, "created_at": now_iso(), "duration_s": round(total / SR, 2),
                 "sample_rate": SR, "target_lufs": args.lufs, "normalize": args.normalize,
                 "peak_ceiling_dbtp": args.peak, "variants": manifest_variants,
