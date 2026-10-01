@@ -19,12 +19,16 @@ skills/guided-meditation/        the skill; installers (npx skills add) copy onl
 README.md                        user-facing: plain English, keep it short
 AGENTS.md                        this file
 .env.example                     ELEVENLABS_API_KEY placeholder
+.github/logo-{light,dark}.svg    README logo, one cut per GitHub theme (keep the two in step)
 ```
 
 Ignored and local only: `.env` (the real key; never print or commit it), `samples/` (reference
 material from an earlier project), `meditations/` (session folders with audio, often 100+ MB),
 `.claude/` (a local link so Claude Code loads the skill from this checkout:
 `mkdir -p .claude/skills && ln -s ../../skills/guided-meditation .claude/skills/guided-meditation`).
+
+The README title is an HTML `<h1>` so the logo can sit above it. Keep its lines unindented: GitHub
+turns every leading space inside a heading into a hyphen in the anchor (`#guided-meditation-skill`).
 
 ## Scripts
 

@@ -1,4 +1,12 @@
-# Guided Meditation Skill
+<h1 align="center">
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset=".github/logo-dark.svg">
+<source media="(prefers-color-scheme: light)" srcset=".github/logo-light.svg">
+<img src=".github/logo-light.svg" alt="" width="108">
+</picture>
+<br>
+Guided Meditation Skill
+</h1>
 
 A Claude Code skill that makes guided meditation audio with ElevenLabs. Describe the meditation
 you want. Claude writes the script, helps you pick a voice by ear, records the narration, and can
