@@ -96,6 +96,36 @@ After a retake moves the timeline, run `assemble_voice.py`, then `fit_music.py` 
 again. Nothing is regenerated. A plan composed before the narration was final drifts from its
 cues by however much the takes change (37 s by the withdrawal in one session).
 
+### Loop after the session
+
+For listeners who stay after the guidance ends (an app or an environment that keeps playing), a
+loop of a few minutes continues the music for as long as they like, and the track flows into it:
+
+1. Set `music.loop_after_session: true`, and end the music playing instead of fading it out: soften
+   it under the final line (to about 0.3), bring it back after the closing bell, and let it settle
+   a couple of seconds before the end (a longer `session.tail_ms`, about 30 s, gives it room).
+2. Generate the loop source in the session music's style with no intro or ending:
+   `generate_music.py SESSION --composition-plan music/plan-loop.json --keep-selection`, a plan of
+   four 60 s sections repeating the session's instruments, key and tempo, steady density, with
+   "intro", "fade in", "ending", "fade out", "final chord" and "silence" among the negative styles.
+3. Add a `loop` entry to `music/timed.json` (see `fit_music.py --help`): the source, the loop length
+   range (150-200 s), and the handoff window (the last part of the closing rest, before the final
+   line). `fit_music.py` cuts the loop between two matching points in the source's steady body
+   (with the crossfade built in, so it repeats without a seam), level-matches it, and crossfades the
+   track's music into it at the best-matching point in the window, preferring a quieter moment.
+   From there to the last sample the track plays loop audio.
+4. `mix.py` renders `output/<slug>.music-loop[.tag].wav` at the level the track's music ends at,
+   starting at the loop phase where the track stops, so a player that starts it when the track ends
+   continues the music exactly, and `<slug>.<version>-into-loop[.tag].preview.mp3` (the last 75 s,
+   one pass of the loop and its restart) for listening. `qa_report.py` checks that the track's last
+   second matches the loop file's and that the loop repeats without a jump.
+
+Play the WAV or FLAC on repeat, starting it exactly when the track ends (gapless: a scheduled start
+in the audio engine, not a timer). MP3 and M4A add a moment of silence at each repeat in most
+players. In testing, the loop's own join matched harmony at 0.99 and level within 0.1 dB; the
+handoff between two separate generations matched less well (harmony about 0.8), which is why it
+goes where the music is softened.
+
 ### Comparing music
 
 `mix.py --music FILE --tag NAME` writes `<slug>.<version>.NAME.<fmt>` and `manifest.NAME.json`
@@ -153,10 +183,11 @@ sources and their hashes, loop joins, resolved cue times and warnings.
 ## QA
 
 `qa_report.py` checks what numbers can check: files exist and decode, equal durations, loudness,
-true peak, clipping, the closing rest meets its minimum, music starts and ends in silence,
-music-free rests are silent, the ambience is still present after the last word, each one-shot
-is audible at its time, and (with `--transcribe`, ElevenLabs Scribe) that each passage says
-the script's words. It cannot hear accent, calm, phrasing, loop seams or balance; its listening
+true peak, clipping, the voice sits equally in both channels of every stereo version, the closing
+rest meets its minimum, music starts and ends in silence (or, with a loop after the session,
+hands over to the loop file exactly, and the loop repeats without a jump), music-free rests are
+silent, the ambience is still present after the last word, each one-shot is audible at its time,
+and (with `--transcribe`, ElevenLabs Scribe) that each passage says the script's words. It cannot hear accent, calm, phrasing, loop seams or balance; its listening
 checklist covers those, and the listener's verdict wins over any number.
 
 A useful listening pass: the first two minutes (voice, entrances), one loop join (the manifest

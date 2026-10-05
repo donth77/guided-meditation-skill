@@ -111,12 +111,17 @@ assembly, not the estimate, is the real length.
 
 ## Audio tags
 
-- Only `eleven_v3` performs tags. For every other model they are stripped before synthesis;
-  never send bracketed directions to a model that would read them aloud.
+- Only the v3 and v4 models (`eleven_v3`, `eleven_v4`, `eleven_v4_turbo`) perform tags. For every
+  other model they are stripped before synthesis; never send bracketed directions to a model
+  that would read them aloud.
 - Permitted: `[whispers]`, `[sighs]`, `[exhales]`, `[inhales deeply]`. At most one per segment
   and four in the script, each one plausible for the chosen calm voice.
-- Never `[short pause]` or `[long pause]` (pauses are data), never sound-effect or environment
-  tags (those are the SFX layer), never emotional stage directions as prose ("she said softly").
+- On v4 a tag's delivery carries on until another tag changes it (ElevenLabs' guidance), so a
+  `[whispers]` at the start of a segment colours the whole passage. Give a whispered line its
+  own segment when only that line should be whispered.
+- Never pause tags (`[pause]`, `[short pause]`, `[long pause]`: pauses are data), never
+  sound-effect or environment tags (those are the SFX layer), never emotional stage directions
+  as prose ("she said softly").
 
 ## Music plan
 
@@ -141,7 +146,8 @@ assembly, not the estimate, is the real length.
   interludes). Fade out before that rest starts; return no earlier than its end.
 - Begin at gain 0 and end at gain 0. With a closing rest, keep the bed through it and fade in its
   final portion (anchor to the rest's `pause_end` with a negative offset) so the closing line is
-  spoken over ambience alone.
+  spoken over ambience alone. The exception is a loop that plays on after the session
+  (`loop_after_session`): then soften the music for the closing line and bring it back after it.
 - Loop needs are handled in the mix (long crossfades between compatible passages, phase
   continuous through muted interludes), so a 2-4 minute generation usually suffices. Music that
   should change with the cues is composed to the measured timeline instead ("Composed to the

@@ -34,8 +34,8 @@ neither, so its passages are generated without context. Some voices read much fa
 than in their audition: when a reading with context runs faster than the accepted pace, the rest of
 the run reads without it (as --no-context does). A multilingual v2 reading longer than about 23.7 s
 comes back squeezed to that length; such takes are flagged, and the fix is a shorter segment.
-Audio tags are sent only to eleven_v3 models and stripped for every other model. Pauses are never
-put in the text.
+Audio tags are sent only to the v3 and v4 models, which perform them, and stripped for every other
+model. Pauses are never put in the text.
 """
 from __future__ import annotations
 
@@ -53,10 +53,10 @@ import numpy as np
 from gm_common import (
     ApiError, SR, api_json, api_key, api_request, at_length_limit, check_budget, count_words, decode_audio,
     default_output_format, die, fail_api, format_pauses, get_models, get_subscription, header_credits, inner_pauses,
-    is_account_blocker, is_v3, ledger, load_script, log_usage, multipart, now_iso, now_unix, probe_duration, read_json,
-    REQUEST_ID_MAX_AGE_S, run_tool, save_api_audio, segment_request, session_root, sha256_file, speech_wpm,
-    STS_CREDITS_PER_MINUTE, strip_tags, trim_digital_silence, tts_rate, V2_REQUEST_MAX_S, voicing_ratio, warn, write_json,
-    write_mp3, write_wav_f32,
+    is_account_blocker, is_v3, ledger, load_script, log_usage, multipart, now_iso, now_unix, performs_tags,
+    probe_duration, read_json, REQUEST_ID_MAX_AGE_S, run_tool, save_api_audio, segment_request, session_root, sha256_file,
+    speech_wpm, STS_CREDITS_PER_MINUTE, strip_tags, trim_digital_silence, tts_rate, V2_REQUEST_MAX_S, voicing_ratio, warn,
+    write_json, write_mp3, write_wav_f32,
 )
 
 DEFAULT_SETTINGS = {"stability": 0.5, "similarity_boost": 0.75, "style": 0.0, "use_speaker_boost": True, "speed": 1.0}
@@ -597,7 +597,7 @@ def cmd_accept(root, script, take):
         if not src_meta:
             die(f"{take} is a conversion, but its guide take {meta.get('source_take')} is missing")
         m = TAG_PREFIX_RE.match(src_meta.get("text") or "")
-        if m and is_v3(src_meta.get("model_id")):
+        if m and performs_tags(src_meta.get("model_id")):
             prefix = m.group(1) + " "     # a delivery direction put before the guide's text, e.g. [softly]
         recipe["method"] = "speech_to_speech"
         recipe["guide"] = {"voice_id": src_meta.get("voice_id"), "voice_name": src_meta.get("voice_name"),
@@ -619,7 +619,7 @@ def cmd_accept(root, script, take):
               f"{planned:g}; set timing.words_per_minute to {meta['speech_wpm']:.0f} and rerun validate_script.py "
               "--write for a realistic estimate (rests, not speech speed, fill the target)")
     # Reuse the accepted audition as a segment take when it is exactly that segment's passage.
-    keep = is_v3(recipe["model_id"])
+    keep = performs_tags(recipe["model_id"])
     accepted_text = meta.get("text") or ""
     if prefix and accepted_text.startswith(prefix):
         accepted_text = accepted_text[len(prefix):]
@@ -661,7 +661,7 @@ def cmd_preview(root, script, takes):
         meta = read_json(folder / f"{name}.json")
         if not meta:
             die(f"voice/audition/{name}.json not found")
-        keep = is_v3(meta.get("model_id"))
+        keep = performs_tags(meta.get("model_id"))
         seg = next((s for s in script["segments"] if segment_request(s, keep)[0] == meta.get("text")), None)
         if seg is None:
             print(f"  {name}: its text matches no segment of the current script; retake to hear new wording")
@@ -788,7 +788,7 @@ def cmd_audition(root, script, args, key, mock):
     voice_ids = [v.strip() for v in (args.voice_id or "").split(",") if v.strip()] or [None]
     recipes = [resolve_recipe(root, argparse.Namespace(**{**vars(args), "voice_id": vid}), key, mock)
                for vid in voice_ids]
-    keep = is_v3(recipes[0]["model_id"])
+    keep = performs_tags(recipes[0]["model_id"])
     seg = None
     if args.text:
         text, spans = args.text.strip(), [(0, len(args.text.strip()))]
@@ -910,7 +910,7 @@ def cmd_convert_guide(root, script, spec, key, mock=False):
     if seg is None or not best:
         die(f"--convert-guide {spec}: segment or guide take not found")
     recipe, target = conversion_recipes(root, mock)
-    text, spans = segment_request(seg, is_v3(recipe["model_id"]))
+    text, spans = segment_request(seg, performs_tags(recipe["model_id"]))
     before = None if mock else check_budget((best.get("duration_s") or 0) / 60 * STS_CREDITS_PER_MINUTE, None, key,
                                              "conversion")
     cmeta = convert_guide(root, key, sid, folder, best, target, recipe, text, spans, mock)
@@ -951,7 +951,7 @@ def cmd_generate(root, script, args, key, mock):
             recipe["seed"] = args.seed
     else:
         recipe = resolve_recipe(root, args, key, mock)
-    keep = is_v3(recipe["model_id"])
+    keep = performs_tags(recipe["model_id"])
     prefix = recipe.get("text_prefix") or ""
     sel = load_selection(root)
     wanted = [s.strip() for s in args.segments.split(",")] if args.segments else None
@@ -1164,7 +1164,7 @@ def main():
     gen.add_argument("--mock", action="store_true", help="offline stand-in voice from the system TTS (not for delivery)")
     rec = ap.add_argument_group("recipe overrides (default: voice.json)")
     rec.add_argument("--voice-id", help="voice to use; with --audition, a comma list compares voices on the same text")
-    rec.add_argument("--model", help="eleven_multilingual_v2 (default), eleven_v3, eleven_flash_v2_5, ...")
+    rec.add_argument("--model", help="eleven_multilingual_v2 (default), eleven_v4, eleven_v3, eleven_flash_v2_5, ...")
     rec.add_argument("--stability", type=float)
     rec.add_argument("--similarity", type=float)
     rec.add_argument("--style", type=float)

@@ -45,8 +45,10 @@ source recordings, not of the settings:
   the listener still heard "whispering too hard".
 - Generated takes of whispery voices come out whispier than their previews; previews at 45-55
   percent generate heavy whispers.
-- For a mostly plain voice with the occasional whispered line, use `eleven_v3` with a calm,
-  voiced narrator and `[whispers]` on the one or two lines that want it.
+- For a mostly plain voice with the occasional whispered line, use a model that performs tags
+  (`eleven_v3`, or `eleven_v4` once auditioned) with a calm, voiced narrator and `[whispers]` on
+  the one or two lines that want it. On v4 the tag carries on through the rest of the request,
+  so put a whispered line in its own segment.
 - Numbers shortlist; the listener chooses. Always audition the shortlist on the script's opening.
 
 ## Choosing a model
@@ -56,8 +58,12 @@ source recordings, not of the settings:
 | `eleven_multilingual_v2` (default) | long-form consistency matters most | most stable on long passages; request stitching; 10,000 chars/request; tags are stripped |
 | `eleven_v3` | tags ([whispers], [exhales]) or more expressive delivery are wanted, and the voice holds up on it | no context between passages (request ids and previous/next text are both refused), so passages can vary more; stability is 0.0 Creative, 0.5 Natural, 1.0 Robust; 5,000 chars; can drift in accent on voices without a v3 fine-tune; very short inputs are less stable |
 | `eleven_flash_v2_5` / `eleven_turbo_v2_5` | budget matters more than nuance | half the credits per character; less nuanced delivery; stitching works |
+| `eleven_v4` / `eleven_v4_turbo` | worth an audition when a voice reads choppily or flat on v2, or tags are wanted with stitching | released September 28, 2026; not yet auditioned for this skill. ElevenLabs documents: its most emotive model, reads pacing and tone from the text, performs tags (each carries on until another tag changes it), request stitching, 10,000 chars (about 10 minutes of audio) per request; no style or speaker boost (the scripts leave them out); no speech to speech. v4 Turbo costs half and is built for low latency |
 
-A model change needs a fresh audition even with the same voice id.
+A model change needs a fresh audition even with the same voice id. On a first v4 audition, check
+in `--list` that the take has its alignment and pace numbers (assembly splits on the alignment),
+and listen for an emotive read that does not suit meditation: v4 takes direction from the text,
+so plain, calm wording matters more than on v2.
 
 ## Settings
 
@@ -101,11 +107,11 @@ A model change needs a fresh audition even with the same voice id.
 | Passages faster than the audition | stitching context: some voices read continuous narration faster | `--no-context` (a run switches by itself after one fast reading with context) |
 | Hurried passage, last breath clipped | the reading hit the 23.7 s request limit and was squeezed to fit (flagged in `--list`) | split the segment at a sentence boundary; more takes read the same way |
 | Whispering too hard | the voice's source recordings are whispered | a different voice: shortlist previews at 65-80 percent voiced with `voices.py ... --measure`; settings and model changes move it only a few points |
-| Too plain, wants a little breath | a fully voiced narrator | a voice whose preview measures 60-75 percent voiced; or eleven_v3 with `[whispers]` on chosen lines |
+| Too plain, wants a little breath | a fully voiced narrator | a voice whose preview measures 60-75 percent voiced; or a v3 or v4 model with `[whispers]` on chosen lines |
 | Accent drifts (e.g. British to American) | model not fine-tuned for the voice; v3 on a voice without a v3 fine-tune; low stability | a fine-tuned model (often multilingual_v2); stability up |
 | Strained or noisy whisper | whisper forced from a voice not recorded whispering; style > 0 | a voice whose source is whispered; style 0; speaker boost off |
 | Misplaced gaps inside a phrase | nondeterministic generation; odd punctuation | retake the whole passage (2 takes); simplify punctuation |
-| Tags read aloud | model is not v3 | tags are stripped for non-v3 models by synthesize.py; check the model |
+| Tags read aloud | the model performs no tags, or a tag is malformed | synthesize.py strips tags for every model but v3 and v4; check the model and the brackets |
 | Pace or tone jumps between passages | stitching context missing (ids older than 2 h, or v3) | regenerate neighbours in one run; keep the same recipe; for v3 accept some variation |
 | A passage sounds unlike the audition | new text, longer passage, nondeterminism | retake that passage; do not change the recipe for everyone because of one passage |
 

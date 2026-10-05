@@ -23,8 +23,8 @@ from __future__ import annotations
 import argparse
 
 from gm_common import (
-    MUSIC_CREDITS_PER_MINUTE, SFX_CREDITS_PER_SECOND, die, estimated_timeline, fmt_time, is_v3, layers_for,
-    load_script, parse_outputs, read_json, run_script, segment_request, session_root, tts_rate,
+    MUSIC_CREDITS_PER_MINUTE, SFX_CREDITS_PER_SECOND, die, estimated_timeline, fmt_time, layers_for, load_script,
+    parse_outputs, performs_tags, read_json, run_script, segment_request, session_root, tts_rate,
 )
 
 
@@ -41,7 +41,7 @@ def missing_work(root, script, variants, mock):
     model = voice.get("model_id") or "eleven_multilingual_v2"
     sel = (read_json(root / "voice" / "selection.json", {}) or {}).get("segments", {})
     segs = [s for s in script["segments"] if str(s["id"]) not in sel]
-    chars = sum(len(segment_request(s, is_v3(model))[0]) for s in segs)
+    chars = sum(len(segment_request(s, performs_tags(model))[0]) for s in segs)
     work = {"segments": [str(s["id"]) for s in segs], "tts_chars": chars, "model": model,
             "tts_credits": 0 if mock else chars * tts_rate(model), "music": False, "music_credits": 0,
             "ambience": False, "one_shots": [], "sfx_credits": 0}

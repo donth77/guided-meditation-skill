@@ -30,7 +30,7 @@ import sys
 from gm_common import (
     ANCHOR_BOUNDARIES, MUSIC_CREDITS_PER_MINUTE, PERMITTED_TAGS, SESSION_BOUNDARIES, SFX_CREDITS_PER_SECOND,
     STS_CREDITS_PER_MINUTE, V2_REQUEST_MAX_S, count_words, cue_envelope, estimated_timeline, find_tags, fmt_time,
-    is_v3, load_script, read_json, resolve_anchor, segment_request, session_pads, session_root, strip_tags,
+    load_script, performs_tags, read_json, resolve_anchor, segment_request, session_pads, session_root, strip_tags,
     timeline_segment, tts_rate, words_per_minute, write_json,
 )
 
@@ -228,8 +228,8 @@ def check(script, model, r):
             r.e(f"{where} the final segment has pause_after_ms 0 (use session.tail_ms for the ending)")
     if total_tags > 4:
         r.e(f"{total_tags} audio tags in the script; maximum four")
-    if total_tags and not is_v3(model):
-        r.i(f"audio tags will be removed before synthesis with {model} (only eleven_v3 performs them)")
+    if total_tags and not performs_tags(model):
+        r.i(f"audio tags will be removed before synthesis with {model} (only the v3 and v4 models perform them)")
     if fatal:
         return None
 
@@ -337,9 +337,20 @@ def check(script, model, r):
         env = check_cues(music.get("cues") or [], "music", seg_set, timeline, r, 0.0)
         if not music.get("cues"):
             r.e("music is enabled but has no cues (it would stay silent at gain 0)")
+        loop_after = bool(music.get("loop_after_session"))
         if env is not None:
             end = timeline["duration_ms"]
-            if env.value_at(end) > 1e-6:
+            if loop_after:
+                # The music hands over to a loop that plays on after the session: it must still be playing.
+                if env.value_at(end) < 0.05:
+                    r.e("music.loop_after_session: the music must still be playing at the end, where the loop "
+                        "takes over (add a cue that brings it back after the final line)")
+                elif env.value_at(end - 1500) != env.value_at(end):
+                    r.w("music.loop_after_session: a cue is still moving in the last 1.5 s; let it settle before the "
+                        "end so the loop continues at a steady level")
+                else:
+                    r.i(f"music continues into the loop after the session at gain {env.value_at(end):.2f}")
+            elif env.value_at(end) > 1e-6:
                 r.e(f"music does not finish at gain 0 (ends at {env.value_at(end):.2f}); add a closing fade")
             for sid in music.get("music_free_pauses") or []:
                 seg = timeline_segment(timeline, sid)
@@ -351,8 +362,9 @@ def check(script, model, r):
                     r.e(f"music_free_pauses: the pause after {sid} has music (gain up to {peak:.2f}); fade out "
                         f"before it starts and return no earlier than its end")
             final = timeline["segments"][-1]
-            if cr and env.value_at(final["segment_start_ms"]) > 1e-6:
-                r.w("music is still playing when the final spoken line starts; fade it during the closing rest")
+            if cr and env.value_at(final["segment_start_ms"]) > (0.5 if loop_after else 1e-6):
+                r.w("music is still playing when the final spoken line starts; fade it during the closing rest"
+                    + (" (with a loop after the session, a dip to about 0.3 is enough)" if loop_after else ""))
     else:
         if music.get("cues") or music.get("music_free_pauses") or _num(music.get("initial_gain"), 0):
             r.e("music is disabled: set cues and music_free_pauses to [] and initial_gain to 0")
@@ -440,7 +452,7 @@ def request_length(script, model, r):
 
 
 def credits(script, model, models=None, conversion=False):
-    keep = is_v3(model)
+    keep = performs_tags(model)
     chars = sum(len(segment_request(s, keep)[0]) for s in script["segments"])
     out = {"model": model, "narration_chars": chars, "narration": chars * tts_rate(model, models)}
     if conversion:      # each passage is read by the guide, then converted: billed per minute of audio

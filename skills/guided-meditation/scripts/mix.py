@@ -33,11 +33,11 @@ from pathlib import Path
 import numpy as np
 
 from gm_common import (
-    BLOCK, SR, Envelope, PieceStream, WavWriter, cue_envelope, db_to_gain, die, duck_envelope, ffmpeg_bin,
+    BLOCK, SR, Envelope, PieceStream, WavWriter, cue_envelope, db_to_gain, decode_audio, die, duck_envelope, ffmpeg_bin,
     ffmpeg_filter_file, fmt_time, layers_for, level_db, load_script, measure_loudness, merge_windows,
     music_activity, music_free_windows, music_loop_plan, now_iso, open_wav_f32, parse_outputs, probe_duration, read_json,
     resolve_anchor, run_tool, seamless_loop_plan, session_root, sha256_file, slug_of, trim_digital_silence, variant_slug,
-    warn, write_json, write_wav_f32,
+    warn, write_json, write_mp3, write_wav_f32,
 )
 
 MUSIC_FILTERS = ["highpass=f=40", "equalizer=f=3000:t=q:w=0.9:g=-3", "highshelf=f=9000:g=-1.5",
@@ -82,7 +82,8 @@ def music_source(root, script, override):
         die("no music source: run generate_music.py (or pass --music FILE / set music.source_file)")
     meta = read_json(root / "music" / f"{name}.json") or {}
     return root / "music" / meta["audio_file"], {"file": f"music/{meta['audio_file']}", "mock": meta.get("mock"),
-                                                 "model_id": meta.get("model_id"), "timed": meta.get("timed")}
+                                                 "model_id": meta.get("model_id"), "timed": meta.get("timed"),
+                                                 "loop_after": meta.get("loop")}
 
 
 def ambience_sources(root, amb, override):
@@ -250,6 +251,14 @@ def build_music(root, script, tl, total, args, work, report):
     g = db_to_gain(gain_db)
     write_stream(root / "stems" / "music.wav", total, 2,
                  lambda s, n: stream.read(n) * (env.block(s, n) * duck.block(s, n) * mute.block(s, n) * g)[:, None])
+    if music.get("loop_after_session") and not info.get("loop_after"):
+        mute.add(total / SR * 1000 - 4000.0, total / SR * 1000, 0.0, "no loop to continue it")
+        report["warnings"].append("music.loop_after_session is set but this music has no loop (fit_music.py makes "
+                                  "one); the music fades out over the last 4 s instead")
+    if info.get("loop_after"):
+        prepare_loop_after(root, info["loop_after"], total, args, work, g,
+                           env.value_at(total / SR * 1000) * duck.value_at(total / SR * 1000)
+                           * mute.value_at(total / SR * 1000), report)
     report["music"] = {**info, "sha256": sha256_file(src), "loop": loop, "bed_loudness_lufs": lm,
                        "calibration_gain_db": round(gain_db, 2), "level_rel_voice_db": args.music_db,
                        "duck_db": args.duck_db, "eq": not args.no_music_eq,
@@ -259,6 +268,28 @@ def build_music(root, script, tl, total, args, work, report):
                        "placement": place}
     if info.get("mock"):
         report["mock"] = True
+
+
+def prepare_loop_after(root, lp, total, args, work, g, end_gain, report):
+    """The loop that plays on after the session (fit_music.py), processed exactly like the bed and set to
+    the level the track's music ends at. It starts at the loop phase where the track stops, so a player
+    that starts it when the track ends continues the music without a seam. Writes work/loop_after.wav."""
+    x = np.array(decode_audio(root / "music" / lp["file"], SR, 2), dtype=np.float32)
+    L = len(x)
+    if L != int(lp["length_samples"]):
+        die(f"music/{lp['file']} is {L} samples, not the {lp['length_samples']} fit_music.py made; rerun it")
+    q = (int(lp["handoff"]["loop_phase_sample"]) + total - int(lp["handoff"]["at_sample"])) % L
+    x = np.roll(x, -q, axis=0)
+    write_wav_f32(work / "loop_tiled.wav", np.vstack([x, x, x]))     # filters see it as the repeating piece it is
+    pre = ffmpeg_filter_file(work / "loop_tiled.wav", work / "loop_tiled_pre.wav",
+                             [] if args.no_music_eq else MUSIC_FILTERS, 2)
+    y = np.array(open_wav_f32(pre)[0])[L: 2 * L] * (g * end_gain)
+    write_wav_f32(work / "loop_after.wav", y.astype(np.float32))
+    if end_gain < 0.05:
+        report["warnings"].append("the music is silent at the end, so the loop after the session starts from silence; "
+                                  "set music.loop_after_session and bring the music back before the end")
+    report["loop_after"] = {"length_s": round(L / SR, 3), "starts_at_loop_s": round(q / SR, 3),
+                            "end_gain": round(end_gain, 3), "source": lp.get("source")}
 
 
 def build_sfx(root, script, tl, total, args, work, report):
@@ -343,15 +374,16 @@ def one_shot_end_frames(root, script, tl):
 # ----------------------------------------------------------------------------- rendering
 
 def graph_for(n_stereo_layers):
+    """Sum the mono voice and the stereo layers into stereo. The voice is made stereo first: amerge keeps
+    its inputs' channel order only when their layouts overlap; a mono (centre) input next to a single
+    stereo one is reordered, which put the voice in one ear."""
     if n_stereo_layers == 0:
         return None
     n = 1 + n_stereo_layers
-    left, right = ["c0"], ["c0"]
-    for k in range(n_stereo_layers):
-        left.append(f"c{1 + 2 * k}")
-        right.append(f"c{2 + 2 * k}")
-    ins = "".join(f"[{i}:a]" for i in range(n))
-    return f"{ins}amerge=inputs={n},pan=stereo|c0={'+'.join(left)}|c1={'+'.join(right)}"
+    ins = "[0:a]pan=stereo|c0=c0|c1=c0[v];[v]" + "".join(f"[{i}:a]" for i in range(1, n))
+    left = "+".join(f"c{2 * k}" for k in range(n))
+    right = "+".join(f"c{2 * k + 1}" for k in range(n))
+    return f"{ins}amerge=inputs={n},pan=stereo|c0={left}|c1={right}"
 
 
 def encode(inputs, graph, gain_db, out, title, mono, limit_db=None):
@@ -500,6 +532,27 @@ def main():
             "true_peak_dbtp": None if tp is None else round(min(tp, args.peak) if args.limit else tp, 1),
             "limited": bool(args.limit and tp is not None and tp > args.peak),
             "loudness_range_lu": m["LRA"], "channels": 1 if graph is None else 2}
+    if report.get("loop_after") and (work / "loop_after.wav").exists():
+        with_music = [v for v in ("voice+music+sfx", "voice+music") if v in plan]
+        g = gains[with_music[0]] if with_music else 0.0
+        files = []
+        for fmt in formats:
+            out = outdir / f"{slug}.music-loop{tag}.{fmt}"
+            encode([work / "loop_after.wav"], None, g, out, f"{title} (music loop)", False, None)
+            files.append(str(out.relative_to(root)))
+        report["loop_after"].update({"files": files, "output_gain_db": round(g, 2),
+                                     "note": "Play the WAV (or FLAC) on repeat as soon as the track ends. MP3 and "
+                                             "M4A add a moment of silence at each repeat in most players."})
+        if with_music:
+            v = with_music[0]
+            n = int(75 * SR)
+            mix_tail = sum(np.array(open_wav_f32(p)[0])[total - n: total] for p in plan[v][0][1:])
+            voice_tail = np.array(open_wav_f32(plan[v][0][0])[0])[total - n: total]
+            loop_y = np.array(open_wav_f32(work / "loop_after.wav")[0])
+            prev = np.vstack([mix_tail + voice_tail.reshape(-1, 1), loop_y, loop_y[: int(30 * SR)]]) * db_to_gain(g)
+            out = outdir / f"{slug}.{variant_slug(v)}-into-loop{tag}.preview.mp3"
+            write_mp3(out, prev.astype(np.float32))
+            report["loop_after"]["preview"] = str(out.relative_to(root))
     if scratch:
         try:
             scratch.cleanup()
@@ -537,6 +590,10 @@ def main():
             print(f"  music under each passage: {feel}"
                   + (f"; note events under speech at {', '.join(fmt(e) for e in pl['events_under_speech_s'])}"
                      if pl["events_under_speech_s"] else ""))
+    la = report.get("loop_after")
+    if la and la.get("files"):
+        print(f"  music loop for after the session: {la['length_s']:.0f}s, starts where the track stops -> "
+              f"{', '.join(la['files'])}" + (f"; hear the handover: {la['preview']}" if la.get("preview") else ""))
     if report["mock"]:
         print("MOCK audio in this mix: rehearsal only, not a deliverable")
     for w in report["warnings"]:

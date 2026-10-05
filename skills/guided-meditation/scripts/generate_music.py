@@ -89,6 +89,7 @@ def main():
     ap.add_argument("--plan-only", action="store_true", help="ask the API for a composition plan and save it")
     ap.add_argument("--accept-suggestion", action="store_true", help="on bad_prompt, retry with the suggested prompt")
     ap.add_argument("--select", metavar="SOURCE", help="choose the source mix.py uses (e.g. source-02)")
+    ap.add_argument("--keep-selection", action="store_true", help="add the candidate without selecting it (for example a loop for after the session, or one part of composed music)")
     ap.add_argument("--output-format", help="default mp3_44100_192 on Creator and above, else mp3_44100_128")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--max-credits", type=float)
@@ -121,7 +122,6 @@ def main():
         length_ms = int(need + 10000)
         print(f"the bed only needs {need / 1000:.0f}s; generating {length_ms / 1000:.0f}s")
     length_ms = max(10000, min(600000, length_ms))
-    est = length_ms / 60000.0 * MUSIC_CREDITS_PER_MINUTE * args.candidates
     plan = None
     if args.composition_plan:
         plan = read_json(Path(args.composition_plan) if Path(args.composition_plan).is_absolute()
@@ -129,6 +129,10 @@ def main():
                                else Path(args.composition_plan)))
         if plan is None:
             die(f"composition plan {args.composition_plan} not found")
+        # A plan sets its own length: the sum of its sections (chunks for music_v2, sections for music_v1).
+        length_ms = int(sum(float(c.get("duration_ms") or 0) for c in plan.get("chunks") or plan.get("sections") or [])
+                        or length_ms)
+    est = length_ms / 60000.0 * MUSIC_CREDITS_PER_MINUTE * args.candidates
     print(f"{'mock ' if args.mock else ''}music: {model}, {length_ms / 1000:.0f}s x {args.candidates} candidate(s)"
           f"{'' if args.mock else f' ~ {est:,.0f} credits (approximate)'}; bed needed ~{need / 1000:.0f}s "
           f"(mix.py loops it)")
@@ -145,7 +149,8 @@ def main():
                     "length_ms": length_ms, "audio_file": path.name, "audio_sha256": sha256_file(path),
                     "duration_s": round(probe_duration(path) or 0, 2)}
             write_json(folder / f"{name}.json", meta)
-            write_json(folder / "selection.json", {"selected": name, "updated_at": now_iso()})
+            if not args.keep_selection:
+                write_json(folder / "selection.json", {"selected": name, "updated_at": now_iso()})
             print(f"  {name}: mock drone {meta['duration_s']:.0f}s -> music/{path.name}")
         return
 
@@ -202,7 +207,8 @@ def main():
                 "audio_file": path.name, "audio_sha256": sha256_file(path),
                 "duration_s": round(probe_duration(path) or 0, 2), "mock": False}
         write_json(folder / f"{name}.json", meta)
-        write_json(folder / "selection.json", {"selected": name, "updated_at": now_iso()})
+        if not args.keep_selection:
+            write_json(folder / "selection.json", {"selected": name, "updated_at": now_iso()})
         cost = header_credits(headers)
         charged = None if cost is None or charged is None else charged + cost
         ledger(root, {"kind": "music", "source": name, "model": model, "seconds": length_ms / 1000,

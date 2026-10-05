@@ -40,10 +40,10 @@ turns every leading space inside a heading into a hyphen in the anchor (`#guided
 | `render_script.py` | script.md, script.txt, timing.md (estimated, then measured after assembly) |
 | `synthesize.py` | `--audition` (one or several voice ids; writes `.preview.mp3` with the script's rests), `--accept`, passage takes with request stitching (dropped for the rest of a run when a reading with it runs fast; `--no-context`), `--takes N --pick` (stops at the first reading within `--pace-tolerance`), `--retake`, `--select`, `--freeze`, `--list`, `--preview`, `--rescreen`, `--convert` (speech to speech). Accepting a conversion makes voice.json a guide + target recipe: guide readings in `voice/guides/`, only a good one converted (`--convert-guide SEG:TAKE`, `--force-convert`). Flags takes at the 23.7 s request limit |
 | `assemble_voice.py` | voice-track.wav + timeline.json; splits only at phrase boundaries, counts the natural pause and inserts only the missing rest; `preview()` is reused for audition previews |
-| `generate_music.py` | Eleven Music candidates from the prompt or `--composition-plan`, `--select`, `--plan-only`, `bad_prompt` suggestions |
-| `fit_music.py` | composed parts (`music/timed.json`: sources, anchors, stretchable sections) placed on the measured timeline with joins in rests -> `music/fitted.flac`, selected; rerun after retakes |
+| `generate_music.py` | Eleven Music candidates from the prompt or `--composition-plan` (length from the plan), `--select`, `--keep-selection`, `--plan-only`, `bad_prompt` suggestions |
+| `fit_music.py` | composed parts (`music/timed.json`: sources, anchors, stretchable sections) placed on the measured timeline with joins in rests -> `music/fitted.flac`, selected; rerun after retakes. A `loop` entry cuts a seamless loop from a source (`music/loop.flac`) and hands the track's music over to it before the end |
 | `generate_sfx.py` | ambience loop takes and one-shots |
-| `mix.py` | stems and the four versions: placement (`--music-offset`), looping or straight-through play, cue envelopes, ducking, loudness, peak ceiling, `--limit`; `--music FILE --tag NAME` for side-by-side music versions |
+| `mix.py` | stems and the four versions: placement (`--music-offset`), looping or straight-through play, cue envelopes, ducking, loudness, peak ceiling, `--limit`; `--music FILE --tag NAME` for side-by-side music versions; with a fitted loop, `<slug>.music-loop.wav` (starts where the track stops) and a handover preview |
 | `qa_report.py` | file, loudness, timing, cue and silence checks; `--transcribe` word diff (paid); listening checklist; `--tag NAME` for a tagged mix (run right after it: stems are shared) |
 | `pipeline.py` | runs the remaining phases in order; plan and cost only unless `--yes`; `--mock` |
 
@@ -56,11 +56,12 @@ meditations/<slug>/
             guides/<seg>/take-NN.mp3 (conversion recipe: the guide voice's readings)
             passages/<seg>/take-NN.mp3 (+.json, .alignment.json, .preview.mp3)
             selection.json  voice-track.wav  timeline.json
-  music/    source-NN.mp3 (+.json)  selection.json  plan-*.json  timed.json  fitted.flac (+.json)
+  music/    source-NN.mp3 (+.json)  selection.json  plan-*.json  timed.json  fitted.flac (+.json)  loop.flac
             sourced/ (licensed files and their licence notes)
   sfx/      ambience-NN.mp3  one-shots/SNN-NN.mp3  selection.json
   stems/    voice.wav music.wav sfx.wav (sample-aligned, at mix level)
   output/   <slug>.voice|.voice-music|.voice-sfx|.voice-music-sfx[.<tag>] .wav/.mp3, manifest[.<tag>].json
+            <slug>.music-loop[.<tag>].wav (loop after the session), *-into-loop*.preview.mp3
   qa/       report[.<tag>].md, report[.<tag>].json, transcripts/
 ```
 

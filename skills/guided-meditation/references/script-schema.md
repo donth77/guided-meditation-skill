@@ -42,7 +42,7 @@ without the sfx layer.
 ```
 
 - `text`: spoken words, plain punctuation, permitted audio tags only (`[whispers]`, `[sighs]`,
-  `[exhales]`, `[inhales deeply]`; eleven_v3 only, max one per segment, four per script). At
+  `[exhales]`, `[inhales deeply]`; v3 and v4 models only, max one per segment, four per script). At
   least one spoken word per phrase.
 - Phrase `pause_after_ms`: the minimum rest after the complete phrase, measured word to word.
   Positive for every non-final phrase; 0 for the last phrase.
@@ -93,6 +93,7 @@ Every cue and one-shot has an anchor that resolves on the measured timeline
   "looping": { "crossfade_ms": 12000 },     // long equal-power joins between compatible passages
   "initial_gain": 0,                        // always 0
   "music_free_pauses": ["08"],              // whole rest after these segments at gain 0
+  "loop_after_session": false,              // true: the music hands over to a loop that plays on after the session
   "cues": [
     { "id": "M01", "anchor": { "segment_id": "02", "boundary": "segment_start", "offset_ms": 0 },
       "target_gain": 1, "fade_ms": 30000, "direction": "Enter slowly under the voice." }
@@ -102,6 +103,9 @@ Every cue and one-shot has an anchor that resolves on the measured timeline
 
 Rules: cues chronological; each fade finishes before the next cue and the session end; gain
 ends at 0; music-free rests stay at 0 throughout. `length_ms` 3000-600000 (the mix loops it).
+With `loop_after_session`, the music instead ends playing, at a steady gain (no cue moving in the
+last 1.5 s), because a loop continues it after the track (see "Loop after the session" in
+`audio-production.md`); soften it under the final line rather than fading it out.
 When disabled: `enabled: false`, `initial_gain: 0`, `cues: []`, `music_free_pauses: []`.
 
 ## sfx

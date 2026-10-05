@@ -41,9 +41,10 @@ USER_AGENT = "guided-meditation-skill/1.0"
 VARIANTS = ("voice", "voice+music", "voice+sfx", "voice+music+sfx")
 
 # Credit estimates. TTS rates are read from /v1/models when the API is reachable; these are the
-# fallbacks (character_cost_multiplier, September 2026). Music is billed by length, SFX by the
+# fallbacks (character_cost_multiplier, October 2026). Music is billed by length, SFX by the
 # requested duration.
 TTS_RATE_FALLBACK = {
+    "eleven_v4": 1.0, "eleven_v4_turbo": 0.5,
     "eleven_v3": 1.0, "eleven_multilingual_v2": 1.0, "eleven_v3_conversational": 0.5,
     "eleven_flash_v2_5": 0.5, "eleven_turbo_v2_5": 0.5, "eleven_flash_v2": 0.5, "eleven_turbo_v2": 0.5,
 }
@@ -487,7 +488,14 @@ def tts_rate(model_id, models=None):
 
 
 def is_v3(model_id):
+    """eleven_v3 refuses stitching context and takes stability presets (0.0, 0.5, 1.0)."""
     return (model_id or "").startswith("eleven_v3")
+
+
+def performs_tags(model_id):
+    """The v3 and v4 models perform audio tags; any other model would read them aloud, so the
+    scripts strip tags before sending text to it."""
+    return (model_id or "").startswith(("eleven_v3", "eleven_v4"))
 
 
 def audio_ext(output_format):

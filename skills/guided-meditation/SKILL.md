@@ -188,12 +188,14 @@ from the accepted voice. Every take stays on disk; the listener hears the picks,
 overruled with `--select`. With a conversion recipe, the extra takes are guide readings (cheap)
 and only the chosen one is converted; `--convert-guide 03:take-04` converts another reading.
 
-One request per segment keeps each passage connected. With `eleven_multilingual_v2` and the
-flash/turbo models, request ids of neighbouring selected takes younger than two hours are sent
-as `previous_request_ids`/`next_request_ids` (request stitching); otherwise surrounding text is
-sent as context. `eleven_v3` accepts no context at all (no stitching, no previous/next text), so
-each v3 passage stands alone; it is the only model that performs audio tags, and tags are
-stripped for every other model. Some voices read much faster with context than in their
+One request per segment keeps each passage connected. With `eleven_multilingual_v2`, `eleven_v4`
+and the flash/turbo models, request ids of neighbouring selected takes younger than two hours are
+sent as `previous_request_ids`/`next_request_ids` (request stitching); otherwise surrounding text
+is sent as context. `eleven_v3` accepts no context at all (no stitching, no previous/next text), so
+each v3 passage stands alone. The v3 and v4 models perform audio tags; tags are stripped for every
+other model. `eleven_v4` (September 2026) has not been auditioned for this skill yet: treat it as
+a new model, with a fresh audition (see "Choosing a model" in `references/voice-direction.md`).
+Some voices read much faster with context than in their
 audition (one read 121-159 words per minute against 84-108 without): when a reading with context
 comes out faster than the accepted pace, the run continues without context, and `--no-context`
 does so from the start. A take flagged at the 23.7 s request limit was squeezed to fit; more takes
@@ -237,6 +239,12 @@ Three routes, and they can be compared side by side (`mix.py --music FILE --tag 
   A retake that moves the timeline later needs only `fit_music.py` again (free).
 - A licensed recording (Suno, a royalty-free library, the user's own) in `music.source_file` or
   `mix.py --music`; `--music-offset SECONDS` starts it at a chosen point.
+
+For listeners who stay after the guidance, a loop of a few minutes can continue the music for as
+long as they like: `music.loop_after_session`, a loop source generated in the same style with
+`--keep-selection`, and a `loop` entry in `music/timed.json`; `fit_music.py` hands the track over
+to it and `mix.py` renders `<slug>.music-loop.wav`, which starts exactly where the track stops.
+See "Loop after the session" in `references/audio-production.md`.
 
 Prompts must not name artists, bands or songs (the API answers `bad_prompt` with a suggested
 prompt; `--accept-suggestion` uses it). A prompt that mostly lists what to avoid (no melody, no
@@ -305,6 +313,7 @@ screening notes worth a listen, credits spent (from the ledger), and the listeni
 | "Music is too loud / too busy" | `mix.py --music-db -19` (free); busy: new candidate or a stiller prompt |
 | "Try it with my Suno track" | put the file in `music/sourced/`; `mix.py --music music/sourced/FILE --tag suno` (free) |
 | A retake after timed music was composed | assemble, `fit_music.py`, mix (all free) |
+| "Keep the music going after it ends" | loop after the session (Phase 5); one generation, the rest free |
 | "Add ocean sounds" | add or enable `sfx.ambience`, validate, `generate_sfx.py`, `mix.py --outputs ...+sfx` |
 | "Make it longer" | lengthen rests or add segments (validate, render, synthesize only the new ones) |
 | "Different voice" | new audition and accept; every passage is regenerated with the new recipe |
@@ -316,7 +325,7 @@ screening notes worth a listen, credits spent (from the ledger), and the listeni
 - Never synthesize single words, splice inside a phrase, edit word gaps, or time-stretch or
   speed-process speech. A broken phrase is regenerated as a whole passage.
 - Pauses are data (`pause_after_ms`), never tags, SSML breaks or ellipses in the text.
-- Audio tags only for eleven_v3, at most one per segment and four per script.
+- Audio tags only for the v3 and v4 models, at most one per segment and four per script.
 - A lower speed setting is not calm: below ~0.9 voices tend to separate words; very low
   stability (below ~0.3) tends to rush and wander. Prefer a naturally calm voice.
 - Keep the voice consistent: same voice, model and settings for every passage; a model change

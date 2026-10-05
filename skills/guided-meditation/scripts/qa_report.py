@@ -30,8 +30,9 @@ from pathlib import Path
 import numpy as np
 
 from gm_common import (
-    SR, ApiError, api_key, api_request, die, fail_api, fmt_time, iter_decode, ledger, load_script,
-    measure_loudness, multipart, now_iso, open_wav_f32, probe_stream, read_json, session_root, strip_tags,
+    SR, ApiError, api_key, api_request, decode_audio, die, fail_api, ffmpeg_bin, fmt_time, iter_decode, ledger,
+    load_script,
+    measure_loudness, multipart, now_iso, open_wav_f32, probe_stream, read_json, run_tool, session_root, strip_tags,
     usage_count, words, write_json,
 )
 
@@ -59,6 +60,57 @@ CHECKLIST = [
         "A comfortable playback level at normal volume; nothing startling from start to finish.",
     ]),
 ]
+
+
+def excerpt(path, t0, dur, ch):
+    """A few seconds of any audio file, decoded without loading the whole file."""
+    raw = run_tool([ffmpeg_bin(), "-v", "error", "-ss", f"{t0:.3f}", "-t", f"{dur:.3f}", "-i", str(path),
+                    "-f", "f32le", "-ac", str(ch), "-ar", str(SR), "pipe:1"]).stdout
+    return np.frombuffer(raw, dtype="<f4").astype(np.float64).reshape(-1, ch)
+
+
+def check_voice_centred(root, manifest, timeline, check):
+    """The voice must sit equally in both channels of every stereo version (it is mono)."""
+    seg = max(timeline["segments"], key=lambda s: s["speech_end_ms"] - s["segment_start_ms"])
+    t0 = seg["segment_start_ms"] / 1000
+    dur = min(8.0, (seg["speech_end_ms"] - seg["segment_start_ms"]) / 1000)
+    v = excerpt(root / "stems" / "voice.wav", t0, dur, 1)[:, 0]
+    for name, d in manifest["variants"].items():
+        if d.get("channels") != 2:
+            continue
+        f = next((f for f in d["files"] if f.endswith((".wav", ".flac"))), d["files"][0])
+        x = excerpt(root / f, t0, dur, 2)
+        n = min(len(x), len(v))
+        k = [float((x[:n, c] * v[:n]).sum() / ((v[:n] ** 2).sum() + 1e-12)) for c in (0, 1)]
+        bal = 20 * np.log10(max(k[0], 1e-6) / max(k[1], 1e-6))
+        check("PASS" if min(k) > 0 and abs(bal) < 1.0 else "FAIL", f"voice centred in {name}",
+              f"voice in left {k[0]:.2f}, right {k[1]:.2f} (segment {seg['id']})")
+
+
+def check_loop_after(root, music_stem, la, manifest, check):
+    """The loop that plays on after the session: the track's music must end exactly where the loop file
+    starts (its last second equals the loop's last second, since the loop starts at the phase where the
+    track stops), and the loop must repeat without a jump."""
+    wav = next((f for f in la["files"] if f.endswith((".wav", ".flac"))), la["files"][0])
+    y = np.array(decode_audio(root / wav, SR, 2), dtype=np.float64)
+    g = 10 ** (float(la.get("output_gain_db", 0)) / 20)
+    n = SR
+    tail = np.asarray(music_stem, dtype=np.float64)[-n:] * g
+    ref = y[-n:]
+    c = float((tail * ref).sum() / (np.sqrt((tail ** 2).sum() * (ref ** 2).sum()) + 1e-12))
+    dl = rms_db(tail) - rms_db(ref)
+    check("PASS" if c > 0.98 and abs(dl) < 0.5 else "FAIL", "music hands over to the loop",
+          f"the track's last second matches the loop file's (correlation {c:.3f}, level {dl:+.2f} dB); "
+          f"a player that starts {Path(wav).name} when the track ends continues the music")
+    step = np.abs(np.diff(y, axis=0)).max()
+    wrap = np.abs(y[0] - y[-1]).max()
+    h = SR // 2
+    lv = [rms_db(y[k: k + h]) for k in range(0, len(y) - h + 1, h)]
+    typical = float(np.percentile(np.abs(np.diff(lv)), 95))       # how much neighbouring half-seconds differ
+    edge = lv[0] - rms_db(y[-h:])
+    check("PASS" if wrap <= step and abs(edge) <= max(1.5, typical) else "FAIL", "music loop repeats without a seam",
+          f"{la.get('length_s', len(y) / SR):.0f}s loop; sample step at the wrap {wrap:.4f} (largest inside {step:.4f}), "
+          f"level across the wrap {edge:+.1f} dB (neighbouring half-seconds inside differ by up to {typical:.1f} dB)")
 
 
 def rms_db(x):
@@ -174,11 +226,17 @@ def main():
     stems = root / "stems"
     music_path, sfx_path = stems / "music.wav", stems / "sfx.wav"
     end_s = manifest.get("duration_s", dur)
+    check_voice_centred(root, manifest, timeline, check)
+    loop_after = manifest.get("loop_after") or {}
     if "music" in manifest.get("stems", {}) and music_path.exists():
         m, _ = open_wav_f32(music_path)
         a, b = rms_db(window(m, 0, 1.0)), rms_db(window(m, end_s - 1.0, end_s))
-        check("PASS" if max(a, b) < -70 else "FAIL", "music starts and ends in silence",
-              f"first second {a:.0f} dBFS, last second {b:.0f} dBFS")
+        if loop_after.get("files"):
+            check("PASS" if a < -70 else "FAIL", "music starts in silence", f"first second {a:.0f} dBFS")
+            check_loop_after(root, m, loop_after, manifest, check)
+        else:
+            check("PASS" if max(a, b) < -70 else "FAIL", "music starts and ends in silence",
+                  f"first second {a:.0f} dBFS, last second {b:.0f} dBFS")
         for sid in (script.get("music") or {}).get("music_free_pauses") or []:
             s = segs.get(str(sid))
             if s:

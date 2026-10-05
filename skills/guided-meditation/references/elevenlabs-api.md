@@ -1,7 +1,9 @@
 # ElevenLabs API notes
 
 What the scripts call, with limits, costs and failure modes. Checked against the API reference
-and live calls in September 2026; `check_setup.py` shows the live account and model list.
+and live calls in September 2026; the Eleven v4 notes come from ElevenLabs' documentation and the
+`/v1/models` listing (October 2026), not from live tests. `check_setup.py` shows the live account
+and model list.
 Base URL `https://api.elevenlabs.io` (override with `ELEVENLABS_API_BASE`; https only, because the
 key is sent to it), header `xi-api-key`. The key comes from the environment or a `.env`: only
 `ELEVENLABS_API_KEY` is read from the file, and the key is not handed on to ffmpeg or the other
@@ -12,7 +14,7 @@ programs the scripts start.
 | Script | Call | Notes |
 | --- | --- | --- |
 | synthesize | `POST /v1/text-to-speech/{voice_id}/with-timestamps?output_format=` | JSON `audio_base64` + `alignment` (characters with start/end seconds) + `normalized_alignment`; falls back to the plain endpoint if timestamps are refused |
-| synthesize | body | `text, model_id, voice_settings{stability, similarity_boost, style, use_speaker_boost, speed}, seed (0-4294967295), previous_text, next_text, previous_request_ids (max 3), next_request_ids (max 3), apply_text_normalization, language_code` (not for multilingual_v2) |
+| synthesize | body | `text, model_id, voice_settings{stability, similarity_boost, style, use_speaker_boost, speed}, seed (0-4294967295), previous_text, next_text, previous_request_ids (max 3), next_request_ids (max 3), apply_text_normalization, language_code` (not for multilingual_v2). `style` and `use_speaker_boost` are left out for models whose `/v1/models` entry says they cannot use them (v3, v4, flash) |
 | generate_music | `POST /v1/music?output_format=` | `prompt` + `music_length_ms` (3,000-600,000) + `force_instrumental` + `model_id` (`music_v2_5`, `music_v2`, `music_v1`), or `composition_plan`; `seed` only with a plan; response audio with a `song-id` header; paid plans only |
 | generate_music | `POST /v1/music/plan` | composition plan from a prompt (`--plan-only`) |
 | generate_sfx | `POST /v1/sound-generation?output_format=` | `text, duration_seconds (0.5-30), prompt_influence (0-1, default 0.3), loop (bool), model_id eleven_text_to_sound_v2` |
@@ -33,8 +35,10 @@ Response headers worth keeping (the scripts store them per take): `request-id` (
 continuous prosody. Rules: at most 3 each; the ids must be under two hours old (the scripts use
 110 minutes); `previous_text` is ignored when previous ids are sent. `eleven_v3` refuses both
 the ids and `previous_text`/`next_text` (HTTP 400 `unsupported_model`, confirmed live), so v3
-passages are generated without context. The scripts only use ids from takes with the same voice and model, and never use the id
-of a take that the same run is about to replace.
+passages are generated without context. `eleven_v4` supports stitching ("significantly more
+reliable" than before, per ElevenLabs; not yet confirmed live here), so the scripts send it
+context like v2; a refusal would be retried without. The scripts only use ids from takes with the
+same voice and model, and never use the id of a take that the same run is about to replace.
 
 Context can change the pace. One library voice read the same passages 40-60 percent faster with
 context (ids or text) than without; three others were unaffected. Auditions are generated
@@ -52,20 +56,26 @@ context comes out faster than the accepted audition (`--no-context` from the sta
 
 | Model | Characters per request | Credits per character (documented) |
 | --- | ---: | ---: |
+| eleven_v4 | 10,000 | 1.0 |
+| eleven_v4_turbo | 10,000 | 0.5 |
 | eleven_v3 | 5,000 | 1.0 |
 | eleven_v3_conversational | 5,000 | 0.5 |
 | eleven_multilingual_v2 | 10,000 | 1.0 |
 | eleven_flash_v2_5 / turbo_v2_5 | 40,000 | 0.5 |
 
-Speed 0.7-1.2. eleven_v3 stability is one of 0.0, 0.5, 1.0. SSML `<break>` tags work only on v2
-models and destabilize long generations; this skill never uses them.
+Speed 0.7-1.2. eleven_v3 stability is one of 0.0, 0.5, 1.0 (whether v4 also works in presets is
+untested; the scripts send its stability as given). SSML `<break>` tags work only on v2 models and
+destabilize long generations; this skill never uses them. v3 and v4 perform audio tags (v4 adds
+`[pause]` and `[long pause]` and reads text between slashes as IPA); the skill's tags stay
+limited to the four in `script-writing.md`, and rests are inserted at assembly.
 
 Audio length (observed, September 2026): no eleven_multilingual_v2 request returned more than
 23.684 s. Of 174 readings of up to 245 characters, 34 came back exactly that long: all words
 present, the pace squeezed to fit, the last breath clipped. Longer texts were not tested. A
 speech-to-speech conversion returns the length of its input, so it inherits the limit from its
-guide reading. v3 readings ran to 25.8 s. `validate_script.py` warns about segments that may
-reach the limit; `synthesize.py` flags takes that did (`at_length_limit` in the take's JSON).
+guide reading. v3 readings ran to 25.8 s. ElevenLabs documents about 10 minutes of audio per
+`eleven_v4` request; not yet measured here. `validate_script.py` warns about segments that may
+reach the v2 limit; `synthesize.py` flags takes that did (`at_length_limit` in the take's JSON).
 
 ## Costs
 

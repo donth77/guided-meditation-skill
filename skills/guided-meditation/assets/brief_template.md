@@ -16,7 +16,8 @@ VOICE        character: gender, accent, age range, pace; any reference voice or 
 BREATH       how whispered, in the listener's words, mapped to one level:
              plain calm (voiced ~80%) / a little breath (65-80%) / soft whisper (50-65%) /
              heavy whisper (30-50%) / full whisper (~0%). "Whispery" alone is ambiguous: ask
-MODEL        eleven_multilingual_v2 (default) / eleven_v3 (tags, expressive) / flash (budget)
+MODEL        eleven_multilingual_v2 (default) / eleven_v4 (tags, most expressive; new, audition
+             first) / eleven_v3 (tags, expressive) / flash (budget)
 STYLE        phrasing and register; reference script qualities to borrow (not its content)
 ANCHORS      two or three perceptual anchors (a sound of the scene, the breath, body contact)
 OUTPUTS      voice (always) + voice+music / voice+sfx / voice+music+sfx

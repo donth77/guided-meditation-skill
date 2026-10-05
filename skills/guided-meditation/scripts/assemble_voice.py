@@ -32,7 +32,7 @@ import numpy as np
 
 from gm_common import (
     SR, V2_REQUEST_MAX_S, WavWriter, align_map, at_length_limit, count_words, decode_audio, die, fmt_time,
-    format_pauses, is_v3, level_db, load_script, now_iso,
+    format_pauses, level_db, load_script, now_iso, performs_tags,
     quiet_threshold, read_json, runs, segment_request, session_pads, session_root, sha256_file, spoken_mask, warn,
     write_json,
 )
@@ -324,7 +324,7 @@ def main():
         if not meta:
             die(f"segment {sid}: {entry['take']}.json is missing")
         mock |= bool(meta.get("mock"))
-        current, spans_now = segment_request(seg, is_v3(meta.get("model_id")))
+        current, spans_now = segment_request(seg, performs_tags(meta.get("model_id")))
         if current != meta.get("text"):
             warn(f"segment {sid}: the script text changed after {entry['take']} was generated; the take's own "
                  f"text is used. Retake it if the words matter (synthesize.py --segments {sid} --retake)")
